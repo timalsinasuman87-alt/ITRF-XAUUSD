@@ -7,6 +7,47 @@ This project is for researching real historical XAU/USD price data. It does not 
 - `research/` — the Python research program.
 - `database/` — the SQLite research database generated from your data (not included in Git).
 - `tests/` — future automated checks.
+- `research/itrf_context.py` — v0.9 causal market-context definitions, kept separate from the validated v0.8 baseline.
+- `tradingview/` — Pine visual parity references; these are not automated strategies.
+
+## Research versions
+
+`main` preserves the validated v0.8 baseline. The v0.9 contextual framework is
+developed on a feature branch and is deliberately research-only: it adds market
+regime, structure, liquidity, location, confirmation and position-sizing
+definitions without using them to claim profitability. See
+[`docs/v0.9-hypotheses.md`](docs/v0.9-hypotheses.md) for the frozen hypotheses,
+Pine parity, limitations and pre-registered next validation step.
+
+With real data in `data/XAUUSD.csv`, run the isolated v0.9 study with:
+
+```bash
+python research/run_v09_research.py
+```
+
+It writes `database/itrf_v09_research.db`, separately from the v0.8 database.
+
+The pre-registered v0.9 exit-model comparison is separate as well:
+
+```bash
+python research/run_v09_trade_management.py
+```
+
+It compares four fixed management models over the existing v0.8 entry set and
+writes `database/itrf_v09_trade_management.db`. It is not parameter tuning and
+does not establish a profitable or executable strategy.
+
+## Integrated research commands
+
+The default main-engine command remains the validated v0.8 workflow:
+
+```bash
+python research/itrf_research.py
+```
+
+Run either v0.9 study after that baseline with `--v09-context` or
+`--v09-trade-management`; use `--v09-all` for both. Each v0.9 study maintains
+its own database and does not change v0.8 tables or reports.
 
 ## First run
 

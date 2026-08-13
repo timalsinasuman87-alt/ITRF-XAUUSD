@@ -25,6 +25,7 @@ Output:
 
 from __future__ import annotations
 
+import argparse
 import sqlite3
 from pathlib import Path
 
@@ -4090,7 +4091,32 @@ def generate_oos_robustness_analysis(connection):
 # MAIN
 # ============================================================
 
+def _parse_arguments():
+    """Keep v0.8 as the default while exposing explicit v0.9 research runs."""
+    parser = argparse.ArgumentParser(
+        description="ITRF-XAUUSD research engine; v0.8 baseline plus optional v0.9 studies."
+    )
+    parser.add_argument(
+        "--v09-context",
+        action="store_true",
+        help="Run the isolated v0.9 market-context study after the v0.8 baseline.",
+    )
+    parser.add_argument(
+        "--v09-trade-management",
+        action="store_true",
+        help="Run the fixed, non-optimized v0.9 exit-model comparison after v0.8.",
+    )
+    parser.add_argument(
+        "--v09-all",
+        action="store_true",
+        help="Run both v0.9 studies after the v0.8 baseline.",
+    )
+    return parser.parse_args()
+
+
 def main():
+
+    arguments = _parse_arguments()
 
     print()
     print("=" * 75)
@@ -4177,6 +4203,18 @@ def main():
     print(
         "They are NOT true bid/ask buyer-seller counts."
     )
+
+    if arguments.v09_context or arguments.v09_all:
+        from run_v09_research import main as run_v09_context_study
+
+        print("\nRunning v0.9 market-context study in its separate database...")
+        run_v09_context_study()
+
+    if arguments.v09_trade_management or arguments.v09_all:
+        from run_v09_trade_management import main as run_v09_trade_management_study
+
+        print("\nRunning v0.9 fixed trade-management comparison in its separate database...")
+        run_v09_trade_management_study()
 
 # ============================================================
 # OOS STABILITY ANALYSIS v0.6
