@@ -7,9 +7,10 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 
 from itrf_context import ContextConfig, build_trade_plan, create_context_features
-from itrf_research import create_features
+from itrf_research import create_features, validate_market_data
 from run_v09_research import build_context_observations
-from itrf_trade_management import ExitModel, evaluate_exit_model, summarize_models
+from itrf_trade_management import ExitModel, TradeCostConfig, cost_in_r, evaluate_exit_model, summarize_models
+from run_v09_trade_management import build_exit_observations
 
 
 def _base_frame():
@@ -83,3 +84,26 @@ class ContextFeatureTests(unittest.TestCase):
         summary = summarize_models(observations).iloc[0]
         self.assertEqual(summary["trades"], 3)
         self.assertEqual(summary["max_drawdown_r"], -2.0)
+
+    def test_costs_convert_to_r_and_reject_invalid_multiplier(self):
+        costs = TradeCostConfig(spread_price=0.2, slippage_price_per_side=0.1, commission_per_contract_per_side=1.0, contract_multiplier=10.0)
+        self.assertAlmostEqual(cost_in_r(2.0, costs), 0.3)
+        with self.assertRaisesRegex(ValueError, "multiplier"):
+            cost_in_r(2.0, TradeCostConfig(contract_multiplier=0))
+
+    def test_one_position_rule_skips_overlapping_v08_candidates(self):
+        frame = pd.concat([_base_frame()] * 4, ignore_index=True)
+        frame["volume"] = 100.0
+        frame["time"] = pd.date_range("2025-01-01", periods=len(frame), freq="15min")
+        features = create_features(frame)
+        # Force a valid v0.8 long setup on adjacent eligible bars.
+        for index in (250, 251):
+            if index < len(features):
+                features.loc[index, ["trend", "momentum_atr", "delta_zscore", "bullish_sweep"]] = [1, 1, 2, 1]
+        observations = build_exit_observations(features)
+        self.assertTrue((observations.groupby("model")["timestamp"].count() <= 1).all())
+
+    def test_invalid_ohlc_is_rejected(self):
+        invalid = pd.DataFrame({"time": pd.to_datetime(["2025-01-01"]), "open": [10.0], "high": [9.0], "low": [8.0], "close": [10.0], "volume": [1.0]})
+        with self.assertRaisesRegex(ValueError, "Invalid OHLC"):
+            validate_market_data(invalid)

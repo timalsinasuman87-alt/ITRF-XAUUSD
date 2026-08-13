@@ -142,7 +142,24 @@ def load_market_data():
             "No valid market data remains."
         )
 
+    validate_market_data(df)
+
     return df
+
+
+def validate_market_data(df):
+    """Reject OHLCV data that cannot support defensible historical research."""
+    if not df["time"].is_monotonic_increasing or df["time"].duplicated().any():
+        raise ValueError("Market data must have unique timestamps in chronological order.")
+    invalid_ohlc = (
+        (df["high"] < df[["open", "close", "low"]].max(axis=1))
+        | (df["low"] > df[["open", "close", "high"]].min(axis=1))
+        | (df["high"] < df["low"])
+    )
+    if invalid_ohlc.any():
+        raise ValueError(f"Invalid OHLC relationships in {int(invalid_ohlc.sum())} row(s).")
+    if (df["volume"] < 0).any():
+        raise ValueError("Volume must not be negative.")
 
 
 # ============================================================

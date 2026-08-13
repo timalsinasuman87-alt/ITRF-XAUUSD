@@ -21,6 +21,22 @@ class ExitModel:
     atr_trail: bool = False
 
 
+@dataclass(frozen=True)
+class TradeCostConfig:
+    """Broker-specific assumptions, expressed in the instrument price currency."""
+
+    spread_price: float = 0.0
+    slippage_price_per_side: float = 0.0
+    commission_per_contract_per_side: float = 0.0
+    contract_multiplier: float = 1.0
+
+    def validate(self) -> None:
+        if min(self.spread_price, self.slippage_price_per_side, self.commission_per_contract_per_side) < 0:
+            raise ValueError("Cost inputs cannot be negative.")
+        if self.contract_multiplier <= 0:
+            raise ValueError("Contract multiplier must be positive.")
+
+
 MODELS = (
     ExitModel("fixed_3r"),
     ExitModel("partial_2r_atr_trail", partial_at_r=2.0, atr_trail=True),
@@ -61,14 +77,17 @@ def evaluate_exit_model(df: pd.DataFrame, index: int, direction: str, entry: flo
     partial_taken = False
     break_even_active = False
     exit_reason = "time_exit"
+    exit_price = entry
+    bars_held = 0
 
-    for _, candle in future.iterrows():
+    for bars_held, (_, candle) in enumerate(future.iterrows(), start=1):
         # Conservative bar assumption: existing protective stop has priority.
         if _stop_hit(candle, stop, direction):
             stop_r = (stop - entry) / risk if direction == "LONG" else (entry - stop) / risk
             realized_r += remaining * stop_r
             remaining = 0.0
             exit_reason = "stop"
+            exit_price = stop
             break
 
         favourable = _favourable(candle, entry, risk, direction)
@@ -86,6 +105,7 @@ def evaluate_exit_model(df: pd.DataFrame, index: int, direction: str, entry: flo
             realized_r += remaining * TARGET_R
             remaining = 0.0
             exit_reason = "target_3r"
+            exit_price = entry + TARGET_R * risk if direction == "LONG" else entry - TARGET_R * risk
             break
 
         # Trailing stops are updated at the end of the bar and apply next bar.
@@ -98,20 +118,32 @@ def evaluate_exit_model(df: pd.DataFrame, index: int, direction: str, entry: flo
         if future.empty:
             mark_r = 0.0
             exit_reason = "no_forward_data"
+            bars_held = 0
         else:
             final_close = float(future.iloc[-1]["close"])
             mark_r = (final_close - entry) / risk if direction == "LONG" else (entry - final_close) / risk
+            exit_price = final_close
+            bars_held = len(future)
         realized_r += remaining * mark_r
 
-    return {"model": model.name, "outcome_r": realized_r, "partial_taken": int(partial_taken), "exit_reason": exit_reason}
+    return {"model": model.name, "outcome_r": realized_r, "partial_taken": int(partial_taken), "exit_reason": exit_reason, "exit_price": exit_price, "bars_held": bars_held}
+
+
+def cost_in_r(risk: float, costs: TradeCostConfig) -> float:
+    """Round-trip spread/slippage/commission converted to R for one contract."""
+    costs.validate()
+    price_cost = costs.spread_price + 2 * costs.slippage_price_per_side
+    commission_cost = 2 * costs.commission_per_contract_per_side / costs.contract_multiplier
+    return (price_cost + commission_cost) / risk
 
 
 def summarize_models(observations: pd.DataFrame) -> pd.DataFrame:
     """Return trade count, average R and sequential-signal max drawdown in R."""
     records = []
     for model, group in observations.sort_values("timestamp").groupby("model", sort=False):
-        equity = group["outcome_r"].cumsum()
+        outcome_column = "net_outcome_r" if "net_outcome_r" in group else "outcome_r"
+        equity = group[outcome_column].cumsum()
         peak = equity.cummax()
         max_drawdown_r = (equity - peak).min() if not equity.empty else 0.0
-        records.append({"model": model, "trades": len(group), "average_r": group["outcome_r"].mean(), "max_drawdown_r": max_drawdown_r})
+        records.append({"model": model, "trades": len(group), "average_r": group[outcome_column].mean(), "max_drawdown_r": max_drawdown_r})
     return pd.DataFrame(records)

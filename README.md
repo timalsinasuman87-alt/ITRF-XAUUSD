@@ -37,6 +37,15 @@ It compares four fixed management models over the existing v0.8 entry set and
 writes `database/itrf_v09_trade_management.db`. It is not parameter tuning and
 does not establish a profitable or executable strategy.
 
+Before interpreting an exit comparison, pass your broker's actual cost inputs.
+For example (values shown are placeholders, not recommendations):
+
+```bash
+python research/run_v09_trade_management.py \
+  --spread-price 0.00 --slippage-price-per-side 0.00 \
+  --commission-per-contract-per-side 0.00 --contract-multiplier 1
+```
+
 ## Integrated research commands
 
 The default main-engine command remains the validated v0.8 workflow:
