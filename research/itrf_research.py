@@ -32,7 +32,8 @@ import numpy as np
 import pandas as pd
 
 
-# ============================================================
+# MAIN
+# ============================================================# ============================================================
 # PROJECT SETTINGS
 # ============================================================
 
@@ -1416,7 +1417,478 @@ def generate_regime_analysis(connection):
     )
     print("=" * 110)
 
+# ============================================================
+# OOS REGIME SCORE ANALYSIS v0.7
+# ============================================================
 
+def generate_oos_regime_score_analysis(connection):
+
+    OOS_START = "2025-07-28 17:00:00"
+
+    query = """
+        SELECT
+            timestamp,
+            direction,
+            trend,
+            relative_volume,
+            delta_zscore,
+            delta_change,
+            momentum_atr,
+            candle_efficiency,
+            bullish_sweep,
+            bearish_sweep,
+            hit_1r,
+            hit_2r,
+            hit_3r,
+            stopped,
+            mfe,
+            mae,
+            outcome_r
+        FROM feature_observations
+        ORDER BY timestamp
+    """
+
+    df = pd.read_sql_query(query, connection)
+
+    print()
+    print("=" * 110)
+    print("ITRF OOS REGIME SCORE ANALYSIS v0.7")
+    print("=" * 110)
+
+    if df.empty:
+        print("No observations available.")
+        print("=" * 110)
+        return
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+    # --------------------------------------------------------
+    # Frozen OOS period
+    # --------------------------------------------------------
+
+    oos_df = df.loc[
+        df["timestamp"] >= pd.Timestamp(OOS_START)
+    ].copy()
+
+    if oos_df.empty:
+        print("No OOS observations available.")
+        print("=" * 110)
+        return
+
+    # --------------------------------------------------------
+    # Rebuild frozen Score 5-7
+    # --------------------------------------------------------
+
+    oos_df["component_delta"] = 0
+
+    oos_df.loc[
+        (
+            ((oos_df["direction"] == "LONG") &
+             (oos_df["delta_zscore"] >= 1.0))
+            |
+            ((oos_df["direction"] == "SHORT") &
+             (oos_df["delta_zscore"] <= -1.0))
+        ),
+        "component_delta"
+    ] = 1
+
+    oos_df["component_delta_change"] = 0
+
+    oos_df.loc[
+        (
+            ((oos_df["direction"] == "LONG") &
+             (oos_df["delta_change"] > 0))
+            |
+            ((oos_df["direction"] == "SHORT") &
+             (oos_df["delta_change"] < 0))
+        ),
+        "component_delta_change"
+    ] = 1
+
+    oos_df["component_momentum"] = 0
+    oos_df.loc[
+        (
+            ((oos_df["direction"] == "LONG") &
+             (oos_df["momentum_atr"] > 0))
+            |
+            ((oos_df["direction"] == "SHORT") &
+             (oos_df["momentum_atr"] < 0))
+        ),
+        "component_momentum"
+    ] = 1
+
+    oos_df["component_efficiency"] = 0
+
+    oos_df.loc[
+        oos_df["candle_efficiency"] >= 0.60,
+        "component_efficiency"
+    ] = 1
+
+    oos_df["component_sweep"] = 0
+
+    oos_df.loc[
+        (
+            ((oos_df["direction"] == "LONG") &
+             (oos_df["bullish_sweep"] == 1))
+            |
+            ((oos_df["direction"] == "SHORT") &
+             (oos_df["bearish_sweep"] == 1))
+        ),
+        "component_sweep"
+    ] = 1
+
+    oos_df["component_volume"] = 0
+
+    oos_df.loc[
+        (
+            (oos_df["relative_volume"] >= 1.5)
+            &
+            (oos_df["component_delta"] == 1)
+        ),
+        "component_volume"
+    ] = 1
+
+    # --------------------------------------------------------
+    # Frozen score
+    # --------------------------------------------------------
+
+    oos_df["order_flow_score"] = (
+        (oos_df["component_delta"] * 2)
+        + oos_df["component_delta_change"]
+        + oos_df["component_momentum"]
+        + oos_df["component_efficiency"]
+        + oos_df["component_volume"]
+        + oos_df["component_sweep"]
+    )
+
+    # --------------------------------------------------------
+    # Keep only Score 5-7
+    # --------------------------------------------------------
+
+    score_df = oos_df.loc[
+        oos_df["order_flow_score"].between(5, 7)
+    ].copy()
+
+    if score_df.empty:
+        print("No OOS Score 5-7 observations available.")
+        print("=" * 110)
+        return
+
+    # --------------------------------------------------------
+    # Summary helper
+    # --------------------------------------------------------
+
+    def summarize(data):
+
+        if data.empty:
+            return {
+                "samples": 0,
+                "1R_%": 0,
+                "2R_%": 0,
+                "3R_%": 0,
+                "stopped_%": 0,
+                "average_R": 0,
+                "average_MFE": 0,
+                "average_MAE": 0,
+            }
+
+        return {
+            "samples": len(data),
+            "1R_%": round(
+                data["hit_1r"].mean() * 100,
+                2
+            ),
+            "2R_%": round(
+                data["hit_2r"].mean() * 100,
+                2
+            ),
+            "3R_%": round(
+                data["hit_3r"].mean() * 100,
+                2
+            ),
+            "stopped_%": round(
+                data["stopped"].mean() * 100,
+                2
+            ),
+            "average_R": round(
+                data["outcome_r"].mean(),
+                3
+            ),
+            "average_MFE": round(
+                data["mfe"].mean(),
+                3
+            ),
+            "average_MAE": round(
+                data["mae"].mean(),
+                3
+            ),
+        }
+
+    # --------------------------------------------------------
+    # REGIME CONDITIONS
+    # --------------------------------------------------------
+
+    conditions = [
+
+        (
+            "Trend aligned",
+            (
+                ((score_df["direction"] == "LONG") &
+                 (score_df["trend"] == 1))
+                |
+                ((score_df["direction"] == "SHORT") &
+                 (score_df["trend"] == -1))
+            )
+        ),
+
+        (
+            "Trend misaligned",
+            (
+                ((score_df["direction"] == "LONG") &
+                 (score_df["trend"] == -1))
+                |
+                ((score_df["direction"] == "SHORT") &
+                 (score_df["trend"] == 1))
+            )
+        ),
+
+        (
+            "Sweep aligned",
+            (
+                ((score_df["direction"] == "LONG") &
+                 (score_df["bullish_sweep"] == 1))
+                |
+                ((score_df["direction"] == "SHORT") &
+                 (score_df["bearish_sweep"] == 1))
+            )
+        ),
+
+        (
+            "No aligned sweep",
+            (
+                ((score_df["direction"] == "LONG") &
+                 (score_df["bullish_sweep"] == 0))
+                |
+                ((score_df["direction"] == "SHORT") &
+                 (score_df["bearish_sweep"] == 0))
+            )
+        ),
+
+        (
+            "High volume",
+            score_df["relative_volume"] >= 1.50
+        ),
+
+        (
+            "Very high volume",
+            score_df["relative_volume"] >= 2.00
+        ),
+
+        (
+            "Trend + Sweep aligned",
+            (
+                (
+                    ((score_df["direction"] == "LONG") &
+                     (score_df["trend"] == 1))
+                    |
+                    ((score_df["direction"] == "SHORT") &
+                     (score_df["trend"] == -1))
+                )
+                &
+                (
+                    ((score_df["direction"] == "LONG") &
+                     (score_df["bullish_sweep"] == 1))
+                    |
+                    ((score_df["direction"] == "SHORT") &
+                     (score_df["bearish_sweep"] == 1))
+                )
+            )
+        ),
+
+        (
+            "Trend + High volume",
+            (
+                (
+                    ((score_df["direction"] == "LONG") &
+                     (score_df["trend"] == 1))
+                    |
+                    ((score_df["direction"] == "SHORT") &
+                     (score_df["trend"] == -1))
+                )
+                &
+                (score_df["relative_volume"] >= 1.50)
+            )
+        ),
+
+        (
+            "Sweep + High volume",
+            (
+                (
+                    ((score_df["direction"] == "LONG") &
+                     (score_df["bullish_sweep"] == 1))
+                    |
+                    ((score_df["direction"] == "SHORT") &
+                     (score_df["bearish_sweep"] == 1))
+                )
+                &
+                (score_df["relative_volume"] >= 1.50)
+            )
+        ),
+
+        (
+            "Trend + Sweep + High volume",
+            (
+                (
+                    ((score_df["direction"] == "LONG") &
+                     (score_df["trend"] == 1))
+                    |
+                    ((score_df["direction"] == "SHORT") &
+                     (score_df["trend"] == -1))
+                )
+                &
+                (
+                    ((score_df["direction"] == "LONG") &
+                     (score_df["bullish_sweep"] == 1))
+                    |
+                    ((score_df["direction"] == "SHORT") &
+                     (score_df["bearish_sweep"] == 1))
+                )
+                &
+                (score_df["relative_volume"] >= 1.50)
+            )
+        ),
+    ]
+
+    # --------------------------------------------------------
+    # REPORT
+    # --------------------------------------------------------
+
+    records = []
+
+    for name, mask in conditions:
+
+        subset = score_df.loc[mask]
+
+        if len(subset) < 30:
+            continue
+
+        result = summarize(subset)
+
+        records.append(
+            {
+                "condition": name,
+                **result
+            }
+        )
+
+    report = pd.DataFrame(records)
+
+    print()
+    print("-" * 110)
+    print("OOS SCORE 5-7 REGIME CONDITIONS")
+    print("-" * 110)
+
+    if report.empty:
+        print("No conditions met the minimum sample requirement.")
+    else:
+        print(
+            report.to_string(index=False)
+        )
+
+    # --------------------------------------------------------
+    # DIRECTION + REGIME
+    # --------------------------------------------------------
+
+    print()
+    print("-" * 110)
+    print("OOS SCORE 5-7 DIRECTION + TREND")
+    print("-" * 110)
+
+    direction_records = []
+
+    for direction in ["LONG", "SHORT"]:
+
+        for trend_name, trend_value in [
+            ("Trend aligned", 1 if direction == "LONG" else -1),
+            ("Trend misaligned", -1 if direction == "LONG" else 1),
+        ]:
+
+            subset = score_df.loc[
+                (score_df["direction"] == direction)
+                &
+                (score_df["trend"] == trend_value)
+            ]
+
+            if len(subset) < 30:
+                continue
+
+            result = summarize(subset)
+
+            direction_records.append(
+                {
+                    "direction": direction,
+                    "trend_condition": trend_name,
+                    **result
+                }
+            )
+
+    direction_table = pd.DataFrame(
+        direction_records
+    )
+
+    if direction_table.empty:
+        print("No direction/trend conditions met minimum sample.")
+    else:
+        print(
+            direction_table.to_string(index=False)
+        )
+
+    # --------------------------------------------------------
+    # RESEARCH INTEGRITY
+    # --------------------------------------------------------
+
+    print()
+    print("-" * 110)
+    print("RESEARCH INTEGRITY")
+    print("-" * 110)
+
+    print(
+        "OOS start:",
+        OOS_START
+    )
+
+    print(
+        "Score 5-7 observations:",
+        len(score_df)
+    )
+
+    print(
+        "Minimum sample size per condition: 30"
+    )
+
+    print(
+        "Score definition remains frozen from v0.5."
+    )
+
+    print(
+        "No parameter optimization was performed."
+    )
+
+    print(
+        "This analysis evaluates regime conditioning only."
+    )
+
+    print(
+        "Results remain research evidence, "
+        "not proof of profitability."
+    )
+
+    print(
+        "Delta remains a volume-based proxy, "
+        "not true bid/ask flow."
+    )
+
+    print("=" * 110)
 
 # ============================================================
 # ORDER FLOW SCORE RESEARCH v0.3
@@ -2546,6 +3018,8 @@ def generate_oos_validation_analysis(connection):
             delta_change,
             momentum_atr,
             candle_efficiency,
+            bullish_sweep,
+            bearish_sweep,
             hit_1r,
             hit_2r,
             hit_3r,
@@ -2667,7 +3141,25 @@ def generate_oos_validation_analysis(connection):
             "component_efficiency"
         ] = 1
 
+        data["component_sweep"] = 0
+
+        data.loc[
+            (
+                (
+                    (data["direction"] == "LONG")
+                    & (data["bullish_sweep"] == 1)
+                )
+                |
+                (
+                    (data["direction"] == "SHORT")
+                    & (data["bearish_sweep"] == 1)
+                )
+            ),
+            "component_sweep"
+        ] = 1
+
         data["component_volume"] = 0
+
 
         data.loc[
             (
@@ -2704,6 +3196,10 @@ def generate_oos_validation_analysis(connection):
 
         data.loc[
             data["component_momentum"] == 1,
+            "order_flow_score"
+        ] += 1
+        data.loc[
+            data["component_sweep"] == 1,
             "order_flow_score"
         ] += 1
 
@@ -3045,6 +3541,552 @@ def generate_oos_validation_analysis(connection):
     print("=" * 110)
 
 # ============================================================
+# OOS ROBUSTNESS ANALYSIS v0.8
+# ============================================================
+
+def generate_oos_robustness_analysis(connection):
+
+    OOS_START = "2025-07-28 17:00:00"
+
+    BOOTSTRAP_ITERATIONS = 2000
+    RANDOM_SEED = 42
+
+    query = """
+        SELECT
+            timestamp,
+            direction,
+            relative_volume,
+            delta_zscore,
+            delta_change,
+            momentum_atr,
+            candle_efficiency,
+            bullish_sweep,
+            bearish_sweep, 
+            outcome_r
+        FROM feature_observations
+        ORDER BY timestamp
+    """
+
+    df = pd.read_sql_query(
+        query,
+        connection
+    )
+
+    print()
+    print("=" * 110)
+    print("ITRF OOS ROBUSTNESS ANALYSIS v0.8")
+    print("=" * 110)
+
+    if df.empty:
+        print("No observations available.")
+        print("=" * 110)
+        return
+
+    # Frozen score.# --------------------------------------------------------
+    # Prepare timestamps
+    # --------------------------------------------------------
+
+    df["timestamp"] = pd.to_datetime(
+        df["timestamp"]
+    )
+
+    # --------------------------------------------------------
+    # Frozen chronological OOS period
+    # --------------------------------------------------------
+
+    oos_df = df[
+        df["timestamp"] >= OOS_START
+    ].copy()
+
+    if oos_df.empty:
+        print("No OOS observations available.")
+        print("=" * 110)
+        return
+    # --------------------------------------------------------
+    # Reconstruct frozen v0.5 order-flow components
+    # --------------------------------------------------------
+
+    oos_df["component_delta"] = 0
+
+    oos_df.loc[
+        (
+            (
+                (oos_df["direction"] == "LONG")
+                & (oos_df["delta_zscore"] > 0)
+            )
+            |
+            (
+                (oos_df["direction"] == "SHORT")
+                & (oos_df["delta_zscore"] < 0)
+            )
+        ),
+        "component_delta"
+    ] = 1
+
+    oos_df["component_delta_change"] = 0
+
+    oos_df.loc[
+        (
+            (
+                (oos_df["direction"] == "LONG")
+                & (oos_df["delta_change"] > 0)
+            )
+            |
+            (
+                (oos_df["direction"] == "SHORT")
+                & (oos_df["delta_change"] < 0)
+            )
+        ),
+        "component_delta_change"
+    ] = 1
+
+    oos_df["component_momentum"] = 0
+
+    oos_df.loc[
+        (
+            (
+                (oos_df["direction"] == "LONG")
+                & (oos_df["momentum_atr"] > 0)
+            )
+            |
+            (
+                (oos_df["direction"] == "SHORT")
+                & (oos_df["momentum_atr"] < 0)
+            )
+        ),
+        "component_momentum"
+    ] = 1
+
+    oos_df["component_efficiency"] = 0
+
+    oos_df.loc[
+        oos_df["candle_efficiency"] >= 0.5,
+        "component_efficiency"
+    ] = 1
+
+    oos_df["component_volume"] = 0
+
+    oos_df.loc[
+        (
+            (oos_df["relative_volume"] >= 1.5)
+            &
+            (oos_df["component_delta"] == 1)
+        ),
+        "component_volume"
+    ] = 1
+
+    # --------------------------------------------------------
+    # Frozen order-flow score
+    # --------------------------------------------------------
+
+    oos_df["order_flow_score"] = (
+        (oos_df["component_delta"] * 2)
+        + oos_df["component_delta_change"]
+        + oos_df["component_momentum"]
+        + oos_df["component_efficiency"]
+        + oos_df["component_volume"]
+    )
+
+    # --------------------------------------------------------
+    # Frozen Score 5-7 condition
+    # --------------------------------------------------------
+
+    score_5_7 = oos_df[
+        oos_df["order_flow_score"].between(
+            5,
+            7
+        )
+    ].copy()
+
+    if score_5_7.empty:
+        print("No OOS Score 5-7 observations available.")
+        print("=" * 110)
+        return
+
+    # --------------------------------------------------------
+    # Helper function
+    # --------------------------------------------------------
+
+    def calculate_statistics(
+        series,
+        bootstrap_iterations,
+        random_seed,
+    ):
+
+        values = (
+            pd.to_numeric(
+                series,
+                errors="coerce"
+            )
+            .dropna()
+            .to_numpy()
+        )
+
+        if len(values) == 0:
+            return {
+                "samples": 0,
+                "mean_r": np.nan,
+                "median_r": np.nan,
+                "std_r": np.nan,
+                "positive_r_percent": np.nan,
+                "ci_lower": np.nan,
+                "ci_upper": np.nan,
+            }
+
+        mean_r = float(
+            np.mean(values)
+        )
+
+        median_r = float(
+            np.median(values)
+        )
+
+        std_r = float(
+            np.std(
+                values,
+                ddof=1
+            )
+        ) if len(values) > 1 else 0.0
+
+        positive_r_percent = float(
+            np.mean(values > 0) * 100
+        )
+
+        # ----------------------------------------------------
+        # Bootstrap confidence interval
+        # ----------------------------------------------------
+
+        rng = np.random.default_rng(
+            random_seed
+        )
+
+        bootstrap_means = np.empty(
+            bootstrap_iterations
+        )
+
+        for i in range(
+            bootstrap_iterations
+        ):
+
+            sample = rng.choice(
+                values,
+                size=len(values),
+                replace=True,
+            )
+
+            bootstrap_means[i] = np.mean(
+                sample
+            )
+
+        ci_lower = float(
+            np.percentile(
+                bootstrap_means,
+                2.5
+            )
+        )
+
+        ci_upper = float(
+            np.percentile(
+                bootstrap_means,
+                97.5
+            )
+        )
+
+        return {
+            "samples": len(values),
+            "mean_r": mean_r,
+            "median_r": median_r,
+            "std_r": std_r,
+            "positive_r_percent": positive_r_percent,
+            "ci_lower": ci_lower,
+            "ci_upper": ci_upper,
+        }
+
+    # ========================================================
+    # OOS BASELINE
+    # ========================================================
+
+    baseline_stats = calculate_statistics(
+        oos_df["outcome_r"],
+        BOOTSTRAP_ITERATIONS,
+        RANDOM_SEED,
+    )
+
+    # ========================================================
+    # OOS SCORE 5-7
+    # ========================================================
+
+    score_stats = calculate_statistics(
+        score_5_7["outcome_r"],
+        BOOTSTRAP_ITERATIONS,
+        RANDOM_SEED,
+    )
+
+    print()
+    print("-" * 110)
+    print("OOS BASELINE vs SCORE 5-7")
+    print("-" * 110)
+
+    print(
+        f"Baseline samples: "
+        f"{baseline_stats['samples']:,}"
+    )
+
+    print(
+        f"Baseline average R: "
+        f"{baseline_stats['mean_r']:.3f}"
+    )
+
+    print(
+        f"Score 5-7 samples: "
+        f"{score_stats['samples']:,}"
+    )
+
+    print(
+        f"Score 5-7 average R: "
+        f"{score_stats['mean_r']:.3f}"
+    )
+
+    print(
+        f"Score 5-7 median R: "
+        f"{score_stats['median_r']:.3f}"
+    )
+
+    print(
+        f"Score 5-7 standard deviation: "
+        f"{score_stats['std_r']:.3f}"
+    )
+
+    print(
+        f"Score 5-7 positive outcome R: "
+        f"{score_stats['positive_r_percent']:.2f}%"
+    )
+
+    print(
+        f"Score 5-7 bootstrap 95% CI: "
+        f"{score_stats['ci_lower']:.3f} "
+        f"to "
+        f"{score_stats['ci_upper']:.3f}"
+    )
+
+    print(
+        f"Score 5-7 minus OOS baseline: "
+        f"{score_stats['mean_r'] - baseline_stats['mean_r']:.3f}"
+    )
+
+    # ========================================================
+    # DIRECTION ROBUSTNESS
+    # ========================================================
+
+    print()
+    print("-" * 110)
+    print("SCORE 5-7 DIRECTION ROBUSTNESS")
+    print("-" * 110)
+
+    for direction in [
+        "LONG",
+        "SHORT",
+    ]:
+
+        direction_df = score_5_7[
+            score_5_7["direction"] == direction
+        ].copy()
+
+        if len(direction_df) == 0:
+            print()
+            print(
+                f"{direction}: "
+                "No observations."
+            )
+            continue
+
+        direction_stats = calculate_statistics(
+            direction_df["outcome_r"],
+            BOOTSTRAP_ITERATIONS,
+            RANDOM_SEED,
+        )
+
+        print()
+        print(
+            f"{direction}"
+        )
+
+        print(
+            f"  Samples: "
+            f"{direction_stats['samples']:,}"
+        )
+
+        print(
+            f"  Average R: "
+            f"{direction_stats['mean_r']:.3f}"
+        )
+
+        print(
+            f"  Median R: "
+            f"{direction_stats['median_r']:.3f}"
+        )
+
+        print(
+            f"  Positive R: "
+            f"{direction_stats['positive_r_percent']:.2f}%"
+        )
+
+        print(
+            f"  Bootstrap 95% CI: "
+            f"{direction_stats['ci_lower']:.3f} "
+            f"to "
+            f"{direction_stats['ci_upper']:.3f}"
+        )
+
+    # ========================================================
+    # OOS PERIOD ROBUSTNESS
+    # ========================================================
+
+    print()
+    print("-" * 110)
+    print("SCORE 5-7 OOS PERIOD ROBUSTNESS")
+    print("-" * 110)
+
+    period_size = len(
+        score_5_7
+    ) // 4
+
+    if period_size < 30:
+
+        print(
+            "Insufficient observations for "
+            "four-period robustness analysis."
+        )
+
+    else:
+
+        score_5_7 = score_5_7.sort_values(
+            "timestamp"
+        ).reset_index(
+            drop=True
+        )
+
+        for period_number in range(
+            1,
+            5
+        ):
+
+            start_index = (
+                (period_number - 1)
+                * period_size
+            )
+
+            if period_number == 4:
+
+                end_index = len(
+                    score_5_7
+                )
+
+            else:
+
+                end_index = (
+                    period_number
+                    * period_size
+                )
+
+            period_df = score_5_7.iloc[
+                start_index:end_index
+            ]
+
+            period_stats = calculate_statistics(
+                period_df["outcome_r"],
+                BOOTSTRAP_ITERATIONS,
+                RANDOM_SEED + period_number,
+            )
+
+            print()
+            print(
+                f"OOS Period {period_number}"
+            )
+
+            print(
+                f"  Samples: "
+                f"{period_stats['samples']:,}"
+            )
+
+            print(
+                f"  Average R: "
+                f"{period_stats['mean_r']:.3f}"
+            )
+
+            print(
+                f"  Median R: "
+                f"{period_stats['median_r']:.3f}"
+            )
+
+            print(
+                f"  Positive R: "
+                f"{period_stats['positive_r_percent']:.2f}%"
+            )
+
+            print(
+                f"  Bootstrap 95% CI: "
+                f"{period_stats['ci_lower']:.3f} "
+                f"to "
+                f"{period_stats['ci_upper']:.3f}"
+            )
+
+    # ========================================================
+    # RESEARCH INTERPRETATION
+    # ========================================================
+
+    print()
+    print("-" * 110)
+    print("ROBUSTNESS CHECK")
+    print("-" * 110)
+
+    print(
+        "Score definition remains frozen from v0.5."
+    )
+
+    print(
+        "OOS start remains fixed at:",
+        OOS_START
+    )
+
+    print(
+        "No parameter optimization was performed."
+    )
+
+    print(
+        "Bootstrap seed:",
+        RANDOM_SEED
+    )
+
+    print(
+        "Bootstrap iterations:",
+        BOOTSTRAP_ITERATIONS
+    )
+
+    print(
+        "This analysis measures statistical uncertainty "
+        "around observed OOS performance."
+    )
+
+    print(
+        "A confidence interval crossing zero means "
+        "positive average R is not statistically robust "
+        "at the 95% bootstrap level."
+    )
+
+    print(
+        "Results remain research evidence, "
+        "not proof of profitability."
+    )
+
+    print(
+        "Delta remains a volume-based proxy, "
+        "not true bid/ask flow."
+    )
+
+    print("=" * 110)
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -3100,6 +4142,16 @@ def main():
         generate_oos_validation_analysis(
             connection
         )
+        generate_oos_stability_analysis(
+            connection
+        )
+        generate_oos_regime_score_analysis(
+            connection
+        )
+
+        generate_oos_robustness_analysis(
+            connection
+        )
         generate_regime_analysis(
             connection
         )
@@ -3126,6 +4178,410 @@ def main():
         "They are NOT true bid/ask buyer-seller counts."
     )
 
+# ============================================================
+# OOS STABILITY ANALYSIS v0.6
+# ============================================================
+
+def generate_oos_stability_analysis(connection):
+
+    OOS_START = "2025-07-28 17:00:00"
+
+    query = """
+        SELECT
+            timestamp,
+            direction,
+            relative_volume,
+            delta_zscore,
+            delta_change,
+            momentum_atr,
+            candle_efficiency,
+            bullish_sweep,
+            bearish_sweep,
+            hit_1r,
+            hit_2r,
+            hit_3r,
+            stopped,
+            mfe,
+            mae,
+            outcome_r
+        FROM feature_observations
+        ORDER BY timestamp
+    """
+
+    df = pd.read_sql_query(query, connection)
+
+    print()
+    print("=" * 110)
+    print("ITRF OOS STABILITY ANALYSIS v0.6")
+    print("=" * 110)
+
+    if df.empty:
+        print("No observations available.")
+        print("=" * 110)
+        return
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+    # --------------------------------------------------------
+    # Keep only the frozen OOS period.
+    # --------------------------------------------------------
+
+    oos_df = df.loc[
+        df["timestamp"] >= pd.Timestamp(OOS_START)
+    ].copy()
+
+    if oos_df.empty:
+        print("No OOS observations available.")
+        print("=" * 110)
+        return
+
+    # --------------------------------------------------------
+    # Rebuild the frozen research score.
+    # --------------------------------------------------------
+
+    oos_df["component_delta"] = 0
+
+    oos_df.loc[
+        (
+            ((oos_df["direction"] == "LONG") &
+             (oos_df["delta_zscore"] >= 1.0))
+            |
+            ((oos_df["direction"] == "SHORT") &
+             (oos_df["delta_zscore"] <= -1.0))
+        ),
+        "component_delta"
+    ] = 1
+
+    oos_df["component_delta_change"] = 0
+
+    oos_df.loc[
+        (
+            ((oos_df["direction"] == "LONG") &
+             (oos_df["delta_change"] > 0))
+            |
+            ((oos_df["direction"] == "SHORT") &
+             (oos_df["delta_change"] < 0))
+        ),
+        "component_delta_change"
+    ] = 1
+
+    oos_df["component_momentum"] = 0
+
+    oos_df.loc[
+        (
+            ((oos_df["direction"] == "LONG") &
+             (oos_df["momentum_atr"] > 0))
+            |
+            ((oos_df["direction"] == "SHORT") &
+             (oos_df["momentum_atr"] < 0))
+        ),
+        "component_momentum"
+    ] = 1
+
+    oos_df["component_efficiency"] = 0
+
+    oos_df.loc[
+        oos_df["candle_efficiency"] >= 0.60,
+        "component_efficiency"
+    ] = 1
+
+    oos_df["component_sweep"] = 0
+
+    oos_df.loc[
+        (
+            (
+                (oos_df["direction"] == "LONG")
+                & (oos_df["bullish_sweep"] == 1)
+            )
+            |
+            (
+                (oos_df["direction"] == "SHORT")
+                & (oos_df["bearish_sweep"] == 1)
+            )
+        ),
+        "component_sweep"
+    ] = 1
+
+    oos_df["component_volume"] = 0
+
+    oos_df.loc[
+        (
+            (oos_df["relative_volume"] >= 1.5)
+            &
+            (oos_df["component_delta"] == 1)
+        ),
+        "component_volume"
+    ] = 1
+
+    # --------------------------------------------------------
+    # Frozen score.
+    # --------------------------------------------------------
+
+    oos_df["order_flow_score"] = (
+        (oos_df["component_delta"] * 2)
+        + oos_df["component_delta_change"]
+        + oos_df["component_momentum"]
+        + oos_df["component_efficiency"]
+        + oos_df["component_volume"]
+        + oos_df["component_sweep"]
+    )
+
+    # --------------------------------------------------------
+    # Divide OOS chronologically into four equal periods.
+    # --------------------------------------------------------
+
+    oos_df = oos_df.sort_values("timestamp").reset_index(drop=True)
+
+    oos_df["oos_period"] = pd.qcut(
+        oos_df.index,
+        q=4,
+        labels=[
+            "OOS Period 1",
+            "OOS Period 2",
+            "OOS Period 3",
+            "OOS Period 4"
+        ]
+    )
+
+    # --------------------------------------------------------
+    # Summary helper.
+    # --------------------------------------------------------
+
+    def summarize(data):
+
+        if data.empty:
+            return {
+                "samples": 0,
+                "1R_%": 0,
+                "2R_%": 0,
+                "3R_%": 0,
+                "stopped_%": 0,
+                "average_R": 0,
+                "average_MFE": 0,
+                "average_MAE": 0,
+            }
+
+        return {
+            "samples": len(data),
+            "1R_%": round(
+                data["hit_1r"].mean() * 100,
+                2
+            ),
+            "2R_%": round(
+                data["hit_2r"].mean() * 100,
+                2
+            ),
+            "3R_%": round(
+                data["hit_3r"].mean() * 100,
+                2
+            ),
+            "stopped_%": round(
+                data["stopped"].mean() * 100,
+                2
+            ),
+            "average_R": round(
+                data["outcome_r"].mean(),
+                3
+            ),
+            "average_MFE": round(
+                data["mfe"].mean(),
+                3
+            ),
+            "average_MAE": round(
+                data["mae"].mean(),
+                3
+            ),
+        }
+
+    # --------------------------------------------------------
+    # PERIOD STABILITY
+    # --------------------------------------------------------
+
+    print()
+    print("-" * 110)
+    print("OOS PERIOD STABILITY")
+    print("-" * 110)
+
+    period_records = []
+
+    for period, period_df in oos_df.groupby(
+        "oos_period",
+        observed=True
+    ):
+
+        result = summarize(period_df)
+
+        period_records.append(
+            {
+                "period": period,
+                **result
+            }
+        )
+
+    period_table = pd.DataFrame(period_records)
+
+    print(
+        period_table.to_string(index=False)
+    )
+
+    # --------------------------------------------------------
+    # SCORE 3-4 VS SCORE 5-7 BY PERIOD
+    # --------------------------------------------------------
+
+    print()
+    print("-" * 110)
+    print("SCORE STABILITY BY OOS PERIOD")
+    print("-" * 110)
+
+    score_records = []
+
+    for period, period_df in oos_df.groupby(
+        "oos_period",
+        observed=True
+    ):
+
+        for score_name, score_condition in [
+            (
+                "Score 3 to 4",
+                period_df["order_flow_score"].between(3, 4)
+            ),
+            (
+                "Score 5 to 7",
+                period_df["order_flow_score"].between(5, 7)
+            ),
+        ]:
+
+            subset = period_df.loc[
+                score_condition
+            ]
+
+            result = summarize(subset)
+
+            score_records.append(
+                {
+                    "period": period,
+                    "score_condition": score_name,
+                    **result
+                }
+            )
+
+    score_table = pd.DataFrame(score_records)
+
+    print(
+        score_table.to_string(index=False)
+    )
+
+    # --------------------------------------------------------
+    # DIRECTIONAL SCORE 5-7 STABILITY
+    # --------------------------------------------------------
+
+    print()
+    print("-" * 110)
+    print("LONG / SHORT SCORE 5-7 STABILITY")
+    print("-" * 110)
+
+    direction_records = []
+
+    for period, period_df in oos_df.groupby(
+        "oos_period",
+        observed=True
+    ):
+
+        for direction in ["LONG", "SHORT"]:
+
+            subset = period_df.loc[
+                (period_df["direction"] == direction)
+                &
+                (period_df["order_flow_score"].between(5, 7))
+            ]
+
+            result = summarize(subset)
+
+            direction_records.append(
+                {
+                    "period": period,
+                    "direction": direction,
+                    **result
+                }
+            )
+
+    direction_table = pd.DataFrame(
+        direction_records
+    )
+
+    print(
+        direction_table.to_string(index=False)
+    )
+
+    # --------------------------------------------------------
+    # STABILITY CHECK
+    # --------------------------------------------------------
+
+    score_57 = oos_df.loc[
+        oos_df["order_flow_score"].between(5, 7)
+    ]
+
+    period_average_r = []
+
+    for period, period_df in score_57.groupby(
+        "oos_period",
+        observed=True
+    ):
+
+        if not period_df.empty:
+            period_average_r.append(
+                period_df["outcome_r"].mean()
+            )
+
+    positive_periods = sum(
+        value > 0
+        for value in period_average_r
+    )
+
+    print()
+    print("-" * 110)
+    print("STABILITY CHECK")
+    print("-" * 110)
+
+    print(
+        "Score 5-7 positive periods:",
+        positive_periods,
+        "/",
+        len(period_average_r)
+    )
+
+    if period_average_r:
+        print(
+            "Score 5-7 period average R range:",
+            round(min(period_average_r), 3),
+            "to",
+            round(max(period_average_r), 3)
+        )
+
+    print()
+    print(
+        "Rules remain frozen from v0.5."
+    )
+
+    print(
+        "No parameter optimization was performed."
+    )
+
+    print(
+        "This analysis tests temporal stability only."
+    )
+
+    print(
+        "Results remain research evidence, "
+        "not proof of profitability."
+    )
+
+    print(
+        "Delta remains a volume-based proxy, "
+        "not true bid/ask flow."
+    )
+
+    print("=" * 110)
 
 if __name__ == "__main__":
     main()
