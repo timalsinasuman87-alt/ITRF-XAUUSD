@@ -37,6 +37,18 @@ It compares four fixed management models over the existing v0.8 entry set and
 writes `database/itrf_v09_trade_management.db`. It is not parameter tuning and
 does not establish a profitable or executable strategy.
 
+## Integrated research commands
+
+The default main-engine command remains the validated v0.8 workflow:
+
+```bash
+python research/itrf_research.py
+```
+
+Run either v0.9 study after that baseline with `--v09-context` or
+`--v09-trade-management`; use `--v09-all` for both. Each v0.9 study maintains
+its own database and does not change v0.8 tables or reports.
+
 ## First run
 
 From this folder in Terminal:
