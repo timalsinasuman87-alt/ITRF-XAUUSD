@@ -7,6 +7,17 @@ This project is for researching real historical XAU/USD price data. It does not 
 - `research/` — the Python research program.
 - `database/` — the SQLite research database generated from your data (not included in Git).
 - `tests/` — future automated checks.
+- `research/itrf_context.py` — v0.9 causal market-context definitions, kept separate from the validated v0.8 baseline.
+- `tradingview/` — Pine visual parity references; these are not automated strategies.
+
+## Research versions
+
+`main` preserves the validated v0.8 baseline. The v0.9 contextual framework is
+developed on a feature branch and is deliberately research-only: it adds market
+regime, structure, liquidity, location, confirmation and position-sizing
+definitions without using them to claim profitability. See
+[`docs/v0.9-hypotheses.md`](docs/v0.9-hypotheses.md) for the frozen hypotheses,
+Pine parity, limitations and pre-registered next validation step.
 
 ## First run
 
