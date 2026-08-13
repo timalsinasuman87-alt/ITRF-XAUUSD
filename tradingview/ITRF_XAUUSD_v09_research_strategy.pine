@@ -61,14 +61,19 @@ ready = bar_index >= 250 and not na(atr) and not na(deltaStd)
 longSetup = barstate.isconfirmed and ready and longScore >= 4
 shortSetup = barstate.isconfirmed and ready and shortScore >= 4
 
-// ---- State held at the close of the entry bar ----
+// ---- Position lifecycle ----
+// Management starts only after TradingView confirms an open position on a later
+// bar. Cancelling exits while flat prevents stale orders from closing a new
+// position on its entry bar.
 var float entryPrice = na
 var float initialRisk = na
 var float trailExtreme = na
 var bool breakEvenActive = false
 var int entryBar = na
+var float pendingRisk = na
 
 if strategy.position_size == 0
+    strategy.cancel_all()
     entryPrice := na
     initialRisk := na
     trailExtreme := na
@@ -78,23 +83,25 @@ if strategy.position_size == 0
 newLong = longSetup and strategy.position_size == 0
 newShort = shortSetup and strategy.position_size == 0 and not newLong
 if newLong
-    entryPrice := close
-    initialRisk := atr * riskAtr
-    trailExtreme := close
-    entryBar := bar_index
+    pendingRisk := atr * riskAtr
     strategy.entry("Long", strategy.long, comment="v0.8 long entry")
 if newShort
-    entryPrice := close
-    initialRisk := atr * riskAtr
-    trailExtreme := close
-    entryBar := bar_index
+    pendingRisk := atr * riskAtr
     strategy.entry("Short", strategy.short, comment="v0.8 short entry")
 
 // ---- v0.9 fixed management comparison ----
 // Stops below are known before the current bar. Trail/BE changes are made only
 // after placing current-bar exits, so their updates apply from the next bar.
-inLong = strategy.position_size > 0 and not na(entryPrice)
-inShort = strategy.position_size < 0 and not na(entryPrice)
+positionJustOpened = strategy.position_size != 0 and strategy.position_size[1] == 0
+if positionJustOpened
+    entryPrice := strategy.position_avg_price
+    initialRisk := pendingRisk
+    trailExtreme := strategy.position_avg_price
+    breakEvenActive := false
+    entryBar := bar_index
+
+inLong = strategy.position_size > 0 and not na(entryPrice) and not positionJustOpened
+inShort = strategy.position_size < 0 and not na(entryPrice) and not positionJustOpened
 holdingBars = not na(entryBar) ? bar_index - entryBar : 0
 
 if inLong
