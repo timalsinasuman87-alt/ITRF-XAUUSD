@@ -1,0 +1,149 @@
+//@version=5
+strategy(
+     "ITRF XAUUSD v0.9 Research Strategy",
+     overlay=true,
+     pyramiding=0,
+     process_orders_on_close=true,
+     calc_on_order_fills=false,
+     calc_on_every_tick=false,
+     initial_capital=10000)
+
+// Research-only translation of the Python v0.8 entry definition and the fixed
+// v0.9 exit comparison. It is not an automated-trading recommendation.
+// Configure broker costs, fill assumptions and order size in Strategy Properties.
+
+// ---- Frozen v0.8 inputs ----
+atrLength = input.int(14, "ATR length", minval=1, group="v0.8 entry definition")
+volumeLookback = input.int(50, "Volume / delta lookback", minval=2, group="v0.8 entry definition")
+liquidityLookback = input.int(20, "Liquidity lookback", minval=2, group="v0.8 entry definition")
+riskAtr = input.float(1.5, "Initial risk (ATR)", minval=0.1, group="v0.8 entry definition")
+forwardBars = input.int(32, "Maximum holding bars", minval=1, group="v0.9 trade management")
+exitModel = input.string("Fixed 3R", "Exit model", options=["Fixed 3R", "Partial 2R + ATR trail", "Break-even at 1R", "ATR trailing stop"], group="v0.9 trade management")
+
+// Pine's ta.stdev default convention may differ from pandas. This implements
+// the pandas rolling sample standard deviation (ddof=1) used by the Python engine.
+f_sample_stdev(source, length) =>
+    mean = ta.sma(source, length)
+    total = 0.0
+    if not na(mean)
+        for i = 0 to length - 1
+            total += math.pow(source[i] - mean, 2)
+        math.sqrt(total / (length - 1))
+    else
+        na
+
+// ---- v0.8 features and entry score ----
+barRange = high - low
+atr = ta.sma(ta.tr, atrLength)  // Python uses a simple moving average of true range.
+body = math.abs(close - open)
+bodyRatio = barRange > 0 ? body / barRange : 0.0
+closeLocation = barRange > 0 ? ((close - low) - (high - close)) / barRange : 0.0
+
+volumeMean = ta.sma(volume, volumeLookback)
+volumeStd = f_sample_stdev(volume, volumeLookback)
+relativeVolume = volumeMean > 0 ? volume / volumeMean : 0.0
+deltaProxy = closeLocation * volume
+deltaMean = ta.sma(deltaProxy, volumeLookback)
+deltaStd = f_sample_stdev(deltaProxy, volumeLookback)
+deltaZscore = deltaStd > 0 ? (deltaProxy - deltaMean) / deltaStd : 0.0
+momentumAtr = atr > 0 ? (close - close[5]) / atr : 0.0
+ema50 = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+
+previousHigh = ta.highest(high[1], liquidityLookback)
+previousLow = ta.lowest(low[1], liquidityLookback)
+bullishSweep = low < previousLow and close > previousLow
+bearishSweep = high > previousHigh and close < previousHigh
+
+longScore = (ema50 > ema200 ? 1 : 0) + (momentumAtr > 0 ? 1 : 0) + (deltaZscore > 1 ? 1 : 0) + (relativeVolume > 1.5 and deltaProxy > 0 ? 1 : 0) + (bullishSweep ? 2 : 0)
+shortScore = (ema50 < ema200 ? 1 : 0) + (momentumAtr < 0 ? 1 : 0) + (deltaZscore < -1 ? 1 : 0) + (relativeVolume > 1.5 and deltaProxy < 0 ? 1 : 0) + (bearishSweep ? 2 : 0)
+ready = bar_index >= 250 and not na(atr) and not na(deltaStd)
+longSetup = barstate.isconfirmed and ready and longScore >= 4
+shortSetup = barstate.isconfirmed and ready and shortScore >= 4
+
+// ---- State held at the close of the entry bar ----
+var float entryPrice = na
+var float initialRisk = na
+var float trailExtreme = na
+var bool breakEvenActive = false
+var int entryBar = na
+
+if strategy.position_size == 0
+    entryPrice := na
+    initialRisk := na
+    trailExtreme := na
+    breakEvenActive := false
+    entryBar := na
+
+newLong = longSetup and strategy.position_size == 0
+newShort = shortSetup and strategy.position_size == 0 and not newLong
+if newLong
+    entryPrice := close
+    initialRisk := atr * riskAtr
+    trailExtreme := close
+    entryBar := bar_index
+    strategy.entry("Long", strategy.long, comment="v0.8 long entry")
+if newShort
+    entryPrice := close
+    initialRisk := atr * riskAtr
+    trailExtreme := close
+    entryBar := bar_index
+    strategy.entry("Short", strategy.short, comment="v0.8 short entry")
+
+// ---- v0.9 fixed management comparison ----
+// Stops below are known before the current bar. Trail/BE changes are made only
+// after placing current-bar exits, so their updates apply from the next bar.
+inLong = strategy.position_size > 0 and not na(entryPrice)
+inShort = strategy.position_size < 0 and not na(entryPrice)
+holdingBars = not na(entryBar) ? bar_index - entryBar : 0
+
+if inLong
+    initialStop = entryPrice - initialRisk
+    target1 = entryPrice + initialRisk
+    target2 = entryPrice + 2 * initialRisk
+    target3 = entryPrice + 3 * initialRisk
+    trailStop = math.max(initialStop, trailExtreme - atr[1])
+    if holdingBars >= forwardBars
+        strategy.close("Long", comment="32-bar time exit")
+    else if exitModel == "Fixed 3R"
+        strategy.exit("L fixed", "Long", stop=initialStop, limit=target3)
+    else if exitModel == "Break-even at 1R"
+        strategy.exit("L BE", "Long", stop=breakEvenActive ? entryPrice : initialStop, limit=target3)
+        if high >= target1
+            breakEvenActive := true
+    else if exitModel == "Partial 2R + ATR trail"
+        strategy.exit("L partial", "Long", qty_percent=50, stop=initialStop, limit=target2)
+        strategy.exit("L trail remainder", "Long", qty_percent=50, stop=trailStop)
+        trailExtreme := math.max(trailExtreme, high)
+    else
+        strategy.exit("L ATR trail", "Long", stop=trailStop)
+        trailExtreme := math.max(trailExtreme, high)
+
+if inShort
+    initialStop = entryPrice + initialRisk
+    target1 = entryPrice - initialRisk
+    target2 = entryPrice - 2 * initialRisk
+    target3 = entryPrice - 3 * initialRisk
+    trailStop = math.min(initialStop, trailExtreme + atr[1])
+    if holdingBars >= forwardBars
+        strategy.close("Short", comment="32-bar time exit")
+    else if exitModel == "Fixed 3R"
+        strategy.exit("S fixed", "Short", stop=initialStop, limit=target3)
+    else if exitModel == "Break-even at 1R"
+        strategy.exit("S BE", "Short", stop=breakEvenActive ? entryPrice : initialStop, limit=target3)
+        if low <= target1
+            breakEvenActive := true
+    else if exitModel == "Partial 2R + ATR trail"
+        strategy.exit("S partial", "Short", qty_percent=50, stop=initialStop, limit=target2)
+        strategy.exit("S trail remainder", "Short", qty_percent=50, stop=trailStop)
+        trailExtreme := math.min(trailExtreme, low)
+    else
+        strategy.exit("S ATR trail", "Short", stop=trailStop)
+        trailExtreme := math.min(trailExtreme, low)
+
+plot(ema50, "EMA 50", color=color.teal)
+plot(ema200, "EMA 200", color=color.orange)
+plot(previousHigh, "Previous liquidity high", color=color.new(color.red, 70), style=plot.style_linebr)
+plot(previousLow, "Previous liquidity low", color=color.new(color.green, 70), style=plot.style_linebr)
+plotshape(longSetup, title="v0.8 long setup", text="L", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.white)
+plotshape(shortSetup, title="v0.8 short setup", text="S", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white)

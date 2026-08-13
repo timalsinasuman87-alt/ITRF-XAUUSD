@@ -58,6 +58,15 @@ Run either v0.9 study after that baseline with `--v09-context` or
 `--v09-trade-management`; use `--v09-all` for both. Each v0.9 study maintains
 its own database and does not change v0.8 tables or reports.
 
+## TradingView
+
+Paste [`tradingview/ITRF_XAUUSD_v09_research_strategy.pine`](tradingview/ITRF_XAUUSD_v09_research_strategy.pine)
+into a new Pine Editor strategy on an XAUUSD 15-minute chart. It translates the
+v0.8 entry score and lets you select one fixed v0.9 exit model. Configure the
+broker's costs and fill settings in TradingView Strategy Properties; compare its
+output against the Python research, not as evidence that the strategy is ready
+for live trading.
+
 ## First run
 
 From this folder in Terminal:
