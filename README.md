@@ -19,6 +19,14 @@ definitions without using them to claim profitability. See
 [`docs/v0.9-hypotheses.md`](docs/v0.9-hypotheses.md) for the frozen hypotheses,
 Pine parity, limitations and pre-registered next validation step.
 
+With real data in `data/XAUUSD.csv`, run the isolated v0.9 study with:
+
+```bash
+python research/run_v09_research.py
+```
+
+It writes `database/itrf_v09_research.db`, separately from the v0.8 database.
+
 ## First run
 
 From this folder in Terminal:

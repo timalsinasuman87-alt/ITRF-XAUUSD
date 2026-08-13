@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 
 from itrf_context import ContextConfig, build_trade_plan, create_context_features
 from itrf_research import create_features
+from run_v09_research import build_context_observations
 
 
 def _base_frame():
@@ -53,3 +54,14 @@ class ContextFeatureTests(unittest.TestCase):
         context = create_context_features(v08)
         self.assertIn("context_signal", context.columns)
         self.assertIn("market_regime", context.columns)
+
+    def test_research_runner_writes_separate_context_table(self):
+        frame = _base_frame()
+        frame["volume"] = 100.0
+        frame["time"] = pd.date_range("2025-01-01", periods=len(frame), freq="15min")
+        context = create_context_features(create_features(frame))
+        import sqlite3
+        with sqlite3.connect(":memory:") as connection:
+            count = build_context_observations(context, connection)
+            stored = connection.execute("SELECT COUNT(*) FROM v09_context_observations").fetchone()[0]
+        self.assertEqual(count, stored)
