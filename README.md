@@ -1,4 +1,3 @@
-# ITRF-XAUUSD Research Engine
 
 This project is for researching real historical XAU/USD price data. It does not generate market data or trading probabilities without evidence.
 
@@ -28,3 +27,7 @@ The CSV must contain these columns (capitalization does not matter):
 `time, open, high, low, close, volume`
 
 Do not use fabricated, random, or demo data for research results.
+=======
+# ITRF-XAUUSD
+Institutional Trading Research Framework for XAU/USD
+>>>>>>> 0e162c6ae61f28e876bfa0b2a463b9d47b5bf319
