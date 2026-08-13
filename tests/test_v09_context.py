@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 from itrf_context import ContextConfig, build_trade_plan, create_context_features
 from itrf_research import create_features
 from run_v09_research import build_context_observations
+from itrf_trade_management import ExitModel, evaluate_exit_model, summarize_models
 
 
 def _base_frame():
@@ -65,3 +66,20 @@ class ContextFeatureTests(unittest.TestCase):
             count = build_context_observations(context, connection)
             stored = connection.execute("SELECT COUNT(*) FROM v09_context_observations").fetchone()[0]
         self.assertEqual(count, stored)
+
+    def test_break_even_stop_applies_on_the_bar_after_one_r_is_reached(self):
+        frame = pd.DataFrame({"high": [101.1, 100.2], "low": [100.0, 99.8], "close": [100.8, 100.0], "atr": [1.0, 1.0]})
+        result = evaluate_exit_model(frame, -1, "LONG", 100.0, 1.0, 2, ExitModel("break_even_at_1r", break_even_at_r=1.0))
+        self.assertEqual(result["outcome_r"], 0.0)
+        self.assertEqual(result["exit_reason"], "stop")
+
+    def test_fixed_target_marks_three_r_when_reached_without_stop(self):
+        frame = pd.DataFrame({"high": [103.1], "low": [100.1], "close": [103.0], "atr": [1.0]})
+        result = evaluate_exit_model(frame, -1, "LONG", 100.0, 1.0, 1, ExitModel("fixed_3r"))
+        self.assertEqual(result["outcome_r"], 3.0)
+
+    def test_summary_drawdown_is_reported_in_r(self):
+        observations = pd.DataFrame({"timestamp": ["1", "2", "3"], "model": ["fixed_3r"] * 3, "outcome_r": [1.0, -2.0, 1.0]})
+        summary = summarize_models(observations).iloc[0]
+        self.assertEqual(summary["trades"], 3)
+        self.assertEqual(summary["max_drawdown_r"], -2.0)

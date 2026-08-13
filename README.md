@@ -27,6 +27,16 @@ python research/run_v09_research.py
 
 It writes `database/itrf_v09_research.db`, separately from the v0.8 database.
 
+The pre-registered v0.9 exit-model comparison is separate as well:
+
+```bash
+python research/run_v09_trade_management.py
+```
+
+It compares four fixed management models over the existing v0.8 entry set and
+writes `database/itrf_v09_trade_management.db`. It is not parameter tuning and
+does not establish a profitable or executable strategy.
+
 ## First run
 
 From this folder in Terminal:
