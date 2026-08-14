@@ -20,6 +20,11 @@ riskAtr = input.float(1.5, "Initial risk (ATR)", minval=0.1, group="v0.8 entry d
 forwardBars = input.int(32, "Maximum holding bars", minval=1, group="v0.9 trade management")
 exitModel = input.string("Fixed 3R", "Exit model", options=["Fixed 3R", "Partial 2R + ATR trail", "Break-even at 1R", "ATR trailing stop"], group="v0.9 trade management")
 
+// Diagnostics only: each selection is a predeclared descriptive cohort. Do not
+// choose a live rule from a single cohort or date range.
+cohort = input.string("All v0.8 entries", "Diagnostic cohort", options=["All v0.8 entries", "Long only", "Short only", "Long in EMA uptrend", "Short in EMA downtrend", "Long countertrend", "Short countertrend", "High-volatility entries", "Low-volatility entries"], group="v0.9 diagnostics")
+volatilityLookback = input.int(100, "ATR-percent median lookback", minval=10, group="v0.9 diagnostics")
+
 // Pine's ta.stdev default convention may differ from pandas. This implements
 // the pandas rolling sample standard deviation (ddof=1) used by the Python engine.
 f_sample_stdev(source, length) =>
@@ -49,6 +54,9 @@ deltaZscore = deltaStd > 0 ? (deltaProxy - deltaMean) / deltaStd : 0.0
 momentumAtr = atr > 0 ? (close - close[5]) / atr : 0.0
 ema50 = ta.ema(close, 50)
 ema200 = ta.ema(close, 200)
+atrPercent = close > 0 ? atr / close : na
+atrPercentMedian = ta.median(atrPercent, volatilityLookback)
+highVolatility = atrPercent > atrPercentMedian
 
 previousHigh = ta.highest(high[1], liquidityLookback)
 previousLow = ta.lowest(low[1], liquidityLookback)
@@ -58,8 +66,13 @@ bearishSweep = high > previousHigh and close < previousHigh
 longScore = (ema50 > ema200 ? 1 : 0) + (momentumAtr > 0 ? 1 : 0) + (deltaZscore > 1 ? 1 : 0) + (relativeVolume > 1.5 and deltaProxy > 0 ? 1 : 0) + (bullishSweep ? 2 : 0)
 shortScore = (ema50 < ema200 ? 1 : 0) + (momentumAtr < 0 ? 1 : 0) + (deltaZscore < -1 ? 1 : 0) + (relativeVolume > 1.5 and deltaProxy < 0 ? 1 : 0) + (bearishSweep ? 2 : 0)
 ready = bar_index >= 250 and not na(atr) and not na(deltaStd)
-longSetup = barstate.isconfirmed and ready and longScore >= 4
-shortSetup = barstate.isconfirmed and ready and shortScore >= 4
+baseLongSetup = barstate.isconfirmed and ready and longScore >= 4
+baseShortSetup = barstate.isconfirmed and ready and shortScore >= 4
+
+longCohortAllowed = cohort == "All v0.8 entries" or cohort == "Long only" or (cohort == "Long in EMA uptrend" and ema50 > ema200) or (cohort == "Long countertrend" and ema50 < ema200) or (cohort == "High-volatility entries" and highVolatility) or (cohort == "Low-volatility entries" and not highVolatility)
+shortCohortAllowed = cohort == "All v0.8 entries" or cohort == "Short only" or (cohort == "Short in EMA downtrend" and ema50 < ema200) or (cohort == "Short countertrend" and ema50 > ema200) or (cohort == "High-volatility entries" and highVolatility) or (cohort == "Low-volatility entries" and not highVolatility)
+longSetup = baseLongSetup and longCohortAllowed
+shortSetup = baseShortSetup and shortCohortAllowed
 
 // ---- Position lifecycle ----
 // Management starts only after TradingView confirms an open position on a later
