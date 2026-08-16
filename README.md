@@ -94,6 +94,17 @@ unless `--overwrite` is supplied. It is research data only: its tick-side
 volume and fills will not match a broker's CFD feed, so results must not be
 treated as execution or profitability evidence.
 
+For a longer free 15-minute history, use the HistData tick importer instead:
+
+```bash
+python research/download_histdata.py --start 2026-05-01 --end 2026-08-15
+```
+
+It aggregates downloaded bid/ask ticks to midpoint OHLC bars and uses the
+number of ticks per bar as its activity proxy. This is the recommended
+no-account source for exploratory research, but it is **not** interchangeable
+with a broker's trade volume or the TradingView CFD data feed.
+
 ## Data format
 
 The CSV must contain these columns (capitalization does not matter):
