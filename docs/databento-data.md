@@ -41,3 +41,7 @@ quality-condition files without downloading price data.
 The output defaults to `data/databento/GC_front_15m.csv`. It remains separate
 from `data/XAUUSD.csv`; cross-feed research must not combine their volume or
 price series as if they represented the same instrument.
+
+Before running research, use `research/validate_market_data.py` with the bar,
+roll, and condition files. The frozen experiment and interpretation rules are
+documented in `docs/databento-validation-plan.md`.
