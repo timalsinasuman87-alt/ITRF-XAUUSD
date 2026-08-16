@@ -58,6 +58,8 @@ def write_observations(observations: pd.DataFrame, database_file: Path = DATABAS
 
 def _parse_arguments():
     parser = argparse.ArgumentParser(description="Run ITRF v0.9 fixed exit-model research.")
+    parser.add_argument("--data-file", type=Path, default=None)
+    parser.add_argument("--database-file", type=Path, default=None)
     parser.add_argument("--spread-price", type=float, default=0.0)
     parser.add_argument("--slippage-price-per-side", type=float, default=0.0)
     parser.add_argument("--commission-per-contract-per-side", type=float, default=0.0)
@@ -71,19 +73,23 @@ def _parse_arguments():
     return parser.parse_known_args()[0]
 
 
-def main() -> None:
+def main(data_file=None, database_file=None, oos_start=None) -> None:
     arguments = _parse_arguments()
+    selected_data_file = data_file or arguments.data_file
+    selected_database_file = Path(database_file or arguments.database_file or DATABASE_FILE)
+    selected_oos_start = oos_start or arguments.oos_start
     costs = TradeCostConfig(arguments.spread_price, arguments.slippage_price_per_side, arguments.commission_per_contract_per_side, arguments.contract_multiplier)
     costs.validate()
-    df = create_features(load_market_data())
+    df = create_features(load_market_data(selected_data_file))
     observations = build_exit_observations(df, costs)
-    write_observations(observations)
+    selected_database_file.parent.mkdir(parents=True, exist_ok=True)
+    write_observations(observations, selected_database_file)
     print("\nITRF v0.9 EXIT-MODEL COMPARISON — PRE-REGISTERED, DESCRIPTIVE ONLY")
     if observations.empty:
         print("No v0.8 entry candidates were available.")
     else:
         observations["timestamp"] = pd.to_datetime(observations["timestamp"])
-        split_time = resolve_oos_split(observations, arguments.oos_start, "v0.9 exit-model OOS report")
+        split_time = resolve_oos_split(observations, selected_oos_start, "v0.9 exit-model OOS report")
         if split_time is not None:
             print(f"\nIn-sample (before frozen OOS boundary {split_time}):")
             in_sample = observations.loc[observations["timestamp"] < split_time]
@@ -91,7 +97,7 @@ def main() -> None:
             print("\nFrozen OOS (boundary onward):")
             oos = observations.loc[observations["timestamp"] >= split_time]
             print(summarize_models(oos).round(3).to_string(index=False) if not oos.empty else "No OOS trades.")
-    print(f"\nDatabase: {DATABASE_FILE}")
+    print(f"\nDatabase: {selected_database_file}")
     print(f"Costs: spread={costs.spread_price}, slippage/side={costs.slippage_price_per_side}, commission/contract/side={costs.commission_per_contract_per_side}, multiplier={costs.contract_multiplier}")
     print("Max drawdown uses net R on a one-position-at-a-time sequential trade curve.")
     print("Do not select, tune or deploy a model from this output alone.")

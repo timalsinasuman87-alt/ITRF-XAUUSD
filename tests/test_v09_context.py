@@ -7,7 +7,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 
 from itrf_context import ContextConfig, build_trade_plan, create_context_features
-from itrf_research import create_features, validate_market_data
+from itrf_research import create_features, load_market_data, validate_market_data
 from run_v09_research import build_context_observations
 from itrf_trade_management import ExitModel, TradeCostConfig, cost_in_r, evaluate_exit_model, summarize_models
 from run_v09_trade_management import build_exit_observations
@@ -107,3 +107,22 @@ class ContextFeatureTests(unittest.TestCase):
         invalid = pd.DataFrame({"time": pd.to_datetime(["2025-01-01"]), "open": [10.0], "high": [9.0], "low": [8.0], "close": [10.0], "volume": [1.0]})
         with self.assertRaisesRegex(ValueError, "Invalid OHLC"):
             validate_market_data(invalid)
+
+    def test_custom_data_file_is_loaded_and_normalized_to_utc_naive(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            data_file = Path(directory) / "custom.csv"
+            pd.DataFrame({
+                "time": ["2026-01-01 00:00:00+0000"],
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.5],
+                "volume": [10.0],
+            }).to_csv(data_file, index=False)
+
+            loaded = load_market_data(data_file)
+
+        self.assertEqual(loaded.loc[0, "time"], pd.Timestamp("2026-01-01 00:00:00"))
+        self.assertIsNone(loaded.loc[0, "time"].tzinfo)

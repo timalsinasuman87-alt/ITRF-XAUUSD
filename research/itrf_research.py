@@ -81,15 +81,17 @@ def resolve_oos_split(df, requested_start, analysis_name):
         return None
     return split_time
 
-def load_market_data():
+def load_market_data(data_file=DATA_FILE):
 
-    if not DATA_FILE.exists():
+    data_file = Path(data_file)
+
+    if not data_file.exists():
 
         raise FileNotFoundError(
-            f"Missing market data: {DATA_FILE}"
+            f"Missing market data: {data_file}"
         )
 
-    df = pd.read_csv(DATA_FILE)
+    df = pd.read_csv(data_file)
 
     df.columns = [
         column.strip().lower()
@@ -124,9 +126,12 @@ def load_market_data():
         ]
     ].copy()
 
-    df["time"] = pd.to_datetime(
-        df["time"],
-        errors="coerce",
+    # Normalize every source to timezone-naive UTC. Existing naive XAUUSD
+    # timestamps retain their wall-clock values; timezone-aware futures data
+    # becomes directly comparable with the frozen OOS boundary.
+    df["time"] = (
+        pd.to_datetime(df["time"], errors="coerce", utc=True)
+        .dt.tz_convert(None)
     )
 
     numeric_columns = [
@@ -4137,6 +4142,30 @@ def _parse_arguments():
         description="ITRF-XAUUSD research engine; v0.8 baseline plus optional v0.9 studies."
     )
     parser.add_argument(
+        "--data-file",
+        type=Path,
+        default=DATA_FILE,
+        help="OHLCV CSV input. Defaults to the preserved XAUUSD baseline file.",
+    )
+    parser.add_argument(
+        "--database-file",
+        type=Path,
+        default=DATABASE_FILE,
+        help="SQLite output for the v0.8 baseline observations.",
+    )
+    parser.add_argument(
+        "--v09-context-database-file",
+        type=Path,
+        default=PROJECT_ROOT / "database" / "itrf_v09_research.db",
+        help="Separate SQLite output for the v0.9 context study.",
+    )
+    parser.add_argument(
+        "--v09-trade-management-database-file",
+        type=Path,
+        default=PROJECT_ROOT / "database" / "itrf_v09_trade_management.db",
+        help="Separate SQLite output for the v0.9 exit-model study.",
+    )
+    parser.add_argument(
         "--v09-context",
         action="store_true",
         help="Run the isolated v0.9 market-context study after the v0.8 baseline.",
@@ -4171,9 +4200,9 @@ def main():
     print("ITRF-XAUUSD RESEARCH ENGINE v0.2")
     print("=" * 75)
 
-    print("Loading real XAU/USD data...")
+    print(f"Loading market data from {arguments.data_file}...")
 
-    df = load_market_data()
+    df = load_market_data(arguments.data_file)
 
     print(
         f"Loaded {len(df):,} candles."
@@ -4185,8 +4214,9 @@ def main():
 
     print("Building historical observations...")
 
+    arguments.database_file.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(
-        DATABASE_FILE
+        arguments.database_file
     ) as connection:
 
         count = build_database(
@@ -4240,7 +4270,7 @@ def main():
     )
 
     print(
-        f"Database: {DATABASE_FILE}"
+        f"Database: {arguments.database_file}"
     )
 
     print()
@@ -4260,13 +4290,21 @@ def main():
         from run_v09_research import main as run_v09_context_study
 
         print("\nRunning v0.9 market-context study in its separate database...")
-        run_v09_context_study()
+        run_v09_context_study(
+            data_file=arguments.data_file,
+            database_file=arguments.v09_context_database_file,
+            oos_start=arguments.oos_start,
+        )
 
     if arguments.v09_trade_management or arguments.v09_all:
         from run_v09_trade_management import main as run_v09_trade_management_study
 
         print("\nRunning v0.9 fixed trade-management comparison in its separate database...")
-        run_v09_trade_management_study()
+        run_v09_trade_management_study(
+            data_file=arguments.data_file,
+            database_file=arguments.v09_trade_management_database_file,
+            oos_start=arguments.oos_start,
+        )
 
 # ============================================================
 # OOS STABILITY ANALYSIS v0.6

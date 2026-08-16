@@ -92,7 +92,7 @@ def build_context_observations(df: pd.DataFrame, connection: sqlite3.Connection)
     return len(records)
 
 
-def _summary_query(where: str = "", params: tuple = ()) -> pd.DataFrame:
+def _summary_query(database_file: Path = DATABASE_FILE, where: str = "", params: tuple = ()) -> pd.DataFrame:
     query = f"""
         SELECT
             direction,
@@ -110,17 +110,21 @@ def _summary_query(where: str = "", params: tuple = ()) -> pd.DataFrame:
         GROUP BY direction, market_regime, volatility_regime
         ORDER BY direction, market_regime, volatility_regime
     """
-    with sqlite3.connect(DATABASE_FILE) as connection:
+    with sqlite3.connect(database_file) as connection:
         return pd.read_sql_query(query, connection, params=params)
 
 
-def print_report(oos_start: str, available_data: pd.DataFrame) -> None:
+def print_report(
+    oos_start: str,
+    available_data: pd.DataFrame,
+    database_file: Path = DATABASE_FILE,
+) -> None:
     """Print descriptive in-sample/OOS summaries without selecting a winner."""
     print("\n" + "=" * 92)
     print("ITRF v0.9 CONTEXT STUDY — DESCRIPTIVE RESEARCH ONLY")
     print("=" * 92)
     print("\nAll candidates (descriptive; do not select rules from this table):")
-    print(_summary_query().to_string(index=False))
+    print(_summary_query(database_file).to_string(index=False))
     split_time = resolve_oos_split(
         available_data.rename(columns={"time": "timestamp"}),
         oos_start,
@@ -128,7 +132,7 @@ def print_report(oos_start: str, available_data: pd.DataFrame) -> None:
     )
     if split_time is not None:
         print(f"\nFrozen OOS boundary onward ({split_time}; descriptive; no parameter changes):")
-        oos = _summary_query("WHERE timestamp >= ?", (str(split_time),))
+        oos = _summary_query(database_file, "WHERE timestamp >= ?", (str(split_time),))
         print(oos.to_string(index=False) if not oos.empty else "No observations after the OOS boundary.")
     print("\nImportant: results are labels on historical bars, not proof of profitability.")
     print("Costs, slippage, contract multiplier, execution constraints, and overlapping positions are not modelled.")
@@ -136,22 +140,29 @@ def print_report(oos_start: str, available_data: pd.DataFrame) -> None:
 
 def _parse_arguments():
     parser = argparse.ArgumentParser(description="Run ITRF v0.9 context research.")
+    parser.add_argument("--data-file", type=Path, default=None)
+    parser.add_argument("--database-file", type=Path, default=None)
     parser.add_argument(
         "--oos-start",
         default=DEFAULT_OOS_START,
         help="Frozen chronological OOS start. Invalid boundaries safely skip the split report.",
     )
-    return parser.parse_args()
+    # The integrated v0.8 runner has additional flags that are irrelevant here.
+    return parser.parse_known_args()[0]
 
 
-def main() -> None:
+def main(data_file=None, database_file=None, oos_start=None) -> None:
     arguments = _parse_arguments()
-    df = create_context_features(create_features(load_market_data()))
-    with sqlite3.connect(DATABASE_FILE) as connection:
+    selected_data_file = data_file or arguments.data_file
+    selected_database_file = Path(database_file or arguments.database_file or DATABASE_FILE)
+    selected_oos_start = oos_start or arguments.oos_start
+    df = create_context_features(create_features(load_market_data(selected_data_file)))
+    selected_database_file.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(selected_database_file) as connection:
         count = build_context_observations(df, connection)
     print(f"v0.9 context candidates written: {count:,}")
-    print(f"Database: {DATABASE_FILE}")
-    print_report(arguments.oos_start, df)
+    print(f"Database: {selected_database_file}")
+    print_report(selected_oos_start, df, selected_database_file)
 
 
 if __name__ == "__main__":
