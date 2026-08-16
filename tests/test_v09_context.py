@@ -7,7 +7,12 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 
 from itrf_context import ContextConfig, build_trade_plan, create_context_features
-from itrf_research import create_features, load_market_data, validate_market_data
+from itrf_research import (
+    add_frozen_order_flow_score,
+    create_features,
+    load_market_data,
+    validate_market_data,
+)
 from run_v09_research import build_context_observations
 from itrf_trade_management import ExitModel, TradeCostConfig, cost_in_r, evaluate_exit_model, summarize_models
 from run_v09_trade_management import build_exit_observations
@@ -126,3 +131,19 @@ class ContextFeatureTests(unittest.TestCase):
 
         self.assertEqual(loaded.loc[0, "time"], pd.Timestamp("2026-01-01 00:00:00"))
         self.assertIsNone(loaded.loc[0, "time"].tzinfo)
+
+    def test_frozen_score_requires_v05_thresholds_and_includes_sweep(self):
+        rows = pd.DataFrame({
+            "direction": ["LONG", "LONG", "SHORT"],
+            "delta_zscore": [1.0, 0.99, -1.0],
+            "delta_change": [1.0, 1.0, -1.0],
+            "momentum_atr": [1.0, 1.0, -1.0],
+            "candle_efficiency": [0.60, 0.59, 0.60],
+            "bullish_sweep": [1, 1, 0],
+            "bearish_sweep": [0, 0, 1],
+            "relative_volume": [1.5, 1.5, 1.5],
+        })
+
+        scored = add_frozen_order_flow_score(rows)
+
+        self.assertEqual(scored["order_flow_score"].tolist(), [7, 3, 7])

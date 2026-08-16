@@ -183,6 +183,40 @@ def validate_market_data(df):
         raise ValueError("Volume must not be negative.")
 
 
+def add_frozen_order_flow_score(data):
+    """Apply the canonical v0.5 Score 5-7 definition without tuning."""
+    scored = data.copy()
+    scored["component_delta"] = (
+        ((scored["direction"] == "LONG") & (scored["delta_zscore"] >= 1.0))
+        | ((scored["direction"] == "SHORT") & (scored["delta_zscore"] <= -1.0))
+    ).astype(int)
+    scored["component_delta_change"] = (
+        ((scored["direction"] == "LONG") & (scored["delta_change"] > 0))
+        | ((scored["direction"] == "SHORT") & (scored["delta_change"] < 0))
+    ).astype(int)
+    scored["component_momentum"] = (
+        ((scored["direction"] == "LONG") & (scored["momentum_atr"] > 0))
+        | ((scored["direction"] == "SHORT") & (scored["momentum_atr"] < 0))
+    ).astype(int)
+    scored["component_efficiency"] = (scored["candle_efficiency"] >= 0.60).astype(int)
+    scored["component_sweep"] = (
+        ((scored["direction"] == "LONG") & (scored["bullish_sweep"] == 1))
+        | ((scored["direction"] == "SHORT") & (scored["bearish_sweep"] == 1))
+    ).astype(int)
+    scored["component_volume"] = (
+        (scored["relative_volume"] >= 1.5) & (scored["component_delta"] == 1)
+    ).astype(int)
+    scored["order_flow_score"] = (
+        (scored["component_delta"] * 2)
+        + scored["component_delta_change"]
+        + scored["component_momentum"]
+        + scored["component_efficiency"]
+        + scored["component_volume"]
+        + scored["component_sweep"]
+    )
+    return scored
+
+
 # ============================================================
 # ATR
 # ============================================================
@@ -3648,90 +3682,9 @@ def generate_oos_robustness_analysis(connection, oos_start):
         print("No OOS observations available.")
         print("=" * 110)
         return
-    # --------------------------------------------------------
-    # Reconstruct frozen v0.5 order-flow components
-    # --------------------------------------------------------
-
-    oos_df["component_delta"] = 0
-
-    oos_df.loc[
-        (
-            (
-                (oos_df["direction"] == "LONG")
-                & (oos_df["delta_zscore"] > 0)
-            )
-            |
-            (
-                (oos_df["direction"] == "SHORT")
-                & (oos_df["delta_zscore"] < 0)
-            )
-        ),
-        "component_delta"
-    ] = 1
-
-    oos_df["component_delta_change"] = 0
-
-    oos_df.loc[
-        (
-            (
-                (oos_df["direction"] == "LONG")
-                & (oos_df["delta_change"] > 0)
-            )
-            |
-            (
-                (oos_df["direction"] == "SHORT")
-                & (oos_df["delta_change"] < 0)
-            )
-        ),
-        "component_delta_change"
-    ] = 1
-
-    oos_df["component_momentum"] = 0
-
-    oos_df.loc[
-        (
-            (
-                (oos_df["direction"] == "LONG")
-                & (oos_df["momentum_atr"] > 0)
-            )
-            |
-            (
-                (oos_df["direction"] == "SHORT")
-                & (oos_df["momentum_atr"] < 0)
-            )
-        ),
-        "component_momentum"
-    ] = 1
-
-    oos_df["component_efficiency"] = 0
-
-    oos_df.loc[
-        oos_df["candle_efficiency"] >= 0.5,
-        "component_efficiency"
-    ] = 1
-
-    oos_df["component_volume"] = 0
-
-    oos_df.loc[
-        (
-            (oos_df["relative_volume"] >= 1.5)
-            &
-            (oos_df["component_delta"] == 1)
-        ),
-        "component_volume"
-    ] = 1
-
-    # --------------------------------------------------------
-    # Frozen order-flow score
-    # --------------------------------------------------------
-
-    oos_df["order_flow_score"] = (
-        (oos_df["component_delta"] * 2)
-        + oos_df["component_delta_change"]
-        + oos_df["component_momentum"]
-        + oos_df["component_efficiency"]
-        + oos_df["component_volume"]
-    )
+    # Use the same canonical definition as the frozen v0.5 report. Earlier
+    # v0.8 code accidentally loosened two thresholds and omitted the sweep.
+    oos_df = add_frozen_order_flow_score(oos_df)
 
     # --------------------------------------------------------
     # Frozen Score 5-7 condition
