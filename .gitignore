@@ -1,11 +1,13 @@
 .venv/
 __pycache__/
 *.py[cod]
+.secrets/
 
 # Real market data and generated research results stay local.
 data/*.csv
 data/raw/*.csv
 data/processed/*.csv
+data/databento/
 database/*.db
 
 !.gitkeep
