@@ -6,7 +6,8 @@ not replace or masquerade as the OTC XAU/USD spot/CFD feed.
 The importer requests `GC.v.0` from `GLBX.MDP3` with continuous symbology and
 the one-minute OHLCV schema, then resamples to 15-minute bars in UTC. Databento
 continuous prices are original and unadjusted, so rollover gaps are retained.
-Contract changes are saved beside the bar file for audit.
+Official continuous-symbol instrument-ID intervals and provider quality
+conditions are saved beside the bar file for audit.
 
 ## Local API key
 
@@ -33,6 +34,9 @@ python research/download_databento.py \
   --start 2025-01-01 --end 2026-01-01 \
   --download --max-cost-usd 5.00
 ```
+
+Use `--audit-only` to refresh the free continuous-contract mapping and provider
+quality-condition files without downloading price data.
 
 The output defaults to `data/databento/GC_front_15m.csv`. It remains separate
 from `data/XAUUSD.csv`; cross-feed research must not combine their volume or

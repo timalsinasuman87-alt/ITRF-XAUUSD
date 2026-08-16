@@ -21,7 +21,7 @@ DATASET = "GLBX.MDP3"
 SCHEMA = "ohlcv-1m"
 SYMBOL = "GC.v.0"
 STYPE_IN = "continuous"
-STYPE_OUT = "raw_symbol"
+STYPE_OUT = "instrument_id"
 
 
 def load_api_key(key_file: Path = DEFAULT_KEY_FILE) -> str:
@@ -47,7 +47,7 @@ def validate_date_range(start: str, end: str) -> tuple[pd.Timestamp, pd.Timestam
     return start_time, end_time
 
 
-def resample_ohlcv_to_15m(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def resample_ohlcv_to_15m(frame: pd.DataFrame) -> pd.DataFrame:
     """Convert Databento one-minute OHLCV records to engine-ready UTC bars."""
     data = frame.copy()
     if isinstance(data.index, pd.DatetimeIndex):
@@ -72,7 +72,6 @@ def resample_ohlcv_to_15m(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
     if data["time"].duplicated().any():
         raise ValueError("Databento returned overlapping records at the same timestamp.")
 
-    contract_column = "symbol" if "symbol" in data.columns else None
     indexed = data.set_index("time")
     aggregation = {
         "open": "first",
@@ -81,22 +80,28 @@ def resample_ohlcv_to_15m(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
         "close": "last",
         "volume": "sum",
     }
-    if contract_column:
-        aggregation[contract_column] = "last"
     bars = indexed.resample("15min").agg(aggregation)
     bars = bars.dropna(subset=["open", "high", "low", "close"]).reset_index()
 
     engine_bars = bars[["time", "open", "high", "low", "close", "volume"]].copy()
     engine_bars["time"] = engine_bars["time"].dt.strftime("%Y-%m-%d %H:%M:%S%z")
+    return engine_bars
 
-    if contract_column:
-        rolls = bars.loc[
-            bars[contract_column].ne(bars[contract_column].shift()),
-            ["time", contract_column],
-        ].rename(columns={contract_column: "contract"})
-    else:
-        rolls = pd.DataFrame(columns=["time", "contract"])
-    return engine_bars, rolls
+
+def roll_schedule_from_resolution(resolution: dict, symbol: str = SYMBOL) -> pd.DataFrame:
+    """Convert Databento continuous-symbol mappings to an auditable schedule."""
+    mappings = resolution.get("result", {}).get(symbol, [])
+    records = [
+        {
+            "start_date": mapping["d0"],
+            "end_date": mapping["d1"],
+            "instrument_id": mapping["s"],
+        }
+        for mapping in mappings
+    ]
+    if not records:
+        raise ValueError(f"No continuous-contract mappings returned for {symbol}.")
+    return pd.DataFrame(records)
 
 
 def request_parameters(start: str, end: str) -> dict[str, object]:
@@ -110,6 +115,28 @@ def request_parameters(start: str, end: str) -> dict[str, object]:
     }
 
 
+def write_audit_files(client, args: argparse.Namespace) -> tuple[Path, Path, int]:
+    """Save continuous mappings and provider quality conditions without price data."""
+    resolution = client.symbology.resolve(
+        dataset=DATASET,
+        symbols=SYMBOL,
+        stype_in=STYPE_IN,
+        stype_out=STYPE_OUT,
+        start_date=args.start,
+        end_date=args.end,
+    )
+    rolls = roll_schedule_from_resolution(resolution)
+    conditions = pd.DataFrame(
+        client.metadata.get_dataset_condition(DATASET, args.start, args.end)
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    roll_path = args.output.with_name(f"{args.output.stem}_rolls.csv")
+    condition_path = args.output.with_name(f"{args.output.stem}_conditions.csv")
+    rolls.to_csv(roll_path, index=False)
+    conditions.to_csv(condition_path, index=False)
+    return roll_path, condition_path, len(rolls)
+
+
 def _parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Cost-gated Databento CME Gold futures downloader."
@@ -119,6 +146,11 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--key-file", type=Path, default=DEFAULT_KEY_FILE)
     parser.add_argument("--download", action="store_true", help="Request data after estimating cost.")
+    parser.add_argument(
+        "--audit-only",
+        action="store_true",
+        help="Refresh free symbology and quality-condition audit files without price data.",
+    )
     parser.add_argument(
         "--max-cost-usd",
         type=float,
@@ -134,6 +166,8 @@ def main() -> None:
     validate_date_range(args.start, args.end)
     if args.max_cost_usd < 0:
         raise ValueError("--max-cost-usd cannot be negative.")
+    if args.download and args.audit_only:
+        raise ValueError("Choose either --download or --audit-only, not both.")
     if args.output.exists() and not args.overwrite and args.download:
         raise FileExistsError(f"Refusing to overwrite existing file: {args.output}")
 
@@ -152,6 +186,12 @@ def main() -> None:
     print(f"Estimated one-minute records: {record_count:,}")
     print(f"Estimated Databento cost: ${estimate:.4f} USD")
 
+    if args.audit_only:
+        roll_path, condition_path, roll_count = write_audit_files(client, args)
+        print(f"Saved {roll_count:,} contract mapping intervals to {roll_path}")
+        print(f"Saved provider quality conditions to {condition_path}")
+        print("Audit only: no market data was requested.")
+        return
     if not args.download:
         print("Estimate only: no market data was requested.")
         return
@@ -162,13 +202,13 @@ def main() -> None:
         )
 
     store = client.timeseries.get_range(**parameters, stype_out=STYPE_OUT)
-    bars, rolls = resample_ohlcv_to_15m(store.to_df())
+    bars = resample_ohlcv_to_15m(store.to_df())
     args.output.parent.mkdir(parents=True, exist_ok=True)
     bars.to_csv(args.output, index=False)
-    roll_path = args.output.with_name(f"{args.output.stem}_rolls.csv")
-    rolls.to_csv(roll_path, index=False)
+    roll_path, condition_path, roll_count = write_audit_files(client, args)
     print(f"Saved {len(bars):,} 15-minute bars to {args.output}")
-    print(f"Saved contract mapping changes to {roll_path}")
+    print(f"Saved {roll_count:,} contract mapping intervals to {roll_path}")
+    print(f"Saved provider quality conditions to {condition_path}")
     print("The continuous series is not back-adjusted; roll gaps remain in the prices.")
 
 

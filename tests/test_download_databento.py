@@ -3,7 +3,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from research.download_databento import load_api_key, resample_ohlcv_to_15m, validate_date_range
+from research.download_databento import (
+    load_api_key,
+    resample_ohlcv_to_15m,
+    roll_schedule_from_resolution,
+    validate_date_range,
+)
 
 
 def test_resample_ohlcv_to_15m_and_record_contract_change() -> None:
@@ -22,7 +27,7 @@ def test_resample_ohlcv_to_15m_and_record_contract_change() -> None:
         ),
     )
 
-    bars, rolls = resample_ohlcv_to_15m(frame)
+    bars = resample_ohlcv_to_15m(frame)
 
     assert len(bars) == 2
     assert bars.iloc[0].to_dict() == {
@@ -33,7 +38,24 @@ def test_resample_ohlcv_to_15m_and_record_contract_change() -> None:
         "close": 2402.5,
         "volume": 30,
     }
-    assert rolls["contract"].tolist() == ["GCQ6", "GCV6"]
+
+
+def test_roll_schedule_uses_official_continuous_mapping() -> None:
+    resolution = {
+        "result": {
+            "GC.v.0": [
+                {"d0": "2026-01-01", "d1": "2026-01-30", "s": "101"},
+                {"d0": "2026-01-30", "d1": "2026-03-30", "s": "202"},
+            ]
+        }
+    }
+
+    schedule = roll_schedule_from_resolution(resolution)
+
+    assert schedule.to_dict("records") == [
+        {"start_date": "2026-01-01", "end_date": "2026-01-30", "instrument_id": "101"},
+        {"start_date": "2026-01-30", "end_date": "2026-03-30", "instrument_id": "202"},
+    ]
 
 
 def test_date_range_and_missing_key_validation(monkeypatch, tmp_path: Path) -> None:
