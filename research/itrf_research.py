@@ -60,10 +60,26 @@ FORWARD_BARS = 32
 
 RISK_ATR = 1.5
 
+DEFAULT_OOS_START = "2025-07-28 17:00:00"
+
 
 # ============================================================
 # DATA LOADING
 # ============================================================
+
+def resolve_oos_split(df, requested_start, analysis_name):
+    """Return a valid chronological split or stop an invalid OOS report safely."""
+    split_time = pd.Timestamp(requested_start)
+    first_time = df["timestamp"].min()
+    last_time = df["timestamp"].max()
+    if not first_time < split_time <= last_time:
+        print(
+            f"{analysis_name} skipped: OOS start {split_time} is outside the available "
+            f"range {first_time} to {last_time}."
+        )
+        print("Choose a chronological --oos-start inside this dataset before interpreting OOS results.")
+        return None
+    return split_time
 
 def load_market_data():
 
@@ -1439,9 +1455,7 @@ def generate_regime_analysis(connection):
 # OOS REGIME SCORE ANALYSIS v0.7
 # ============================================================
 
-def generate_oos_regime_score_analysis(connection):
-
-    OOS_START = "2025-07-28 17:00:00"
+def generate_oos_regime_score_analysis(connection, oos_start):
 
     query = """
         SELECT
@@ -1480,12 +1494,17 @@ def generate_oos_regime_score_analysis(connection):
 
     df["timestamp"] = pd.to_datetime(df["timestamp"])
 
+    split_time = resolve_oos_split(df, oos_start, "OOS regime-score analysis")
+    if split_time is None:
+        print("=" * 110)
+        return
+
     # --------------------------------------------------------
     # Frozen OOS period
     # --------------------------------------------------------
 
     oos_df = df.loc[
-        df["timestamp"] >= pd.Timestamp(OOS_START)
+        df["timestamp"] >= split_time
     ].copy()
 
     if oos_df.empty:
@@ -1872,7 +1891,7 @@ def generate_oos_regime_score_analysis(connection):
 
     print(
         "OOS start:",
-        OOS_START
+        split_time
     )
 
     print(
@@ -3023,9 +3042,7 @@ def generate_out_of_sample_validation(connection):
 # OUT-OF-SAMPLE VALIDATION v0.5
 # ============================================================
 
-def generate_oos_validation_analysis(connection):
-
-    OOS_START = "2025-07-28 17:00:00"
+def generate_oos_validation_analysis(connection, oos_start):
 
     query = """
         SELECT
@@ -3063,7 +3080,10 @@ def generate_oos_validation_analysis(connection):
 
     df["timestamp"] = pd.to_datetime(df["timestamp"])
 
-    split_time = pd.Timestamp(OOS_START)
+    split_time = resolve_oos_split(df, oos_start, "OOS validation analysis")
+    if split_time is None:
+        print("=" * 110)
+        return
 
     train_df = df.loc[
         df["timestamp"] < split_time
@@ -3562,9 +3582,7 @@ def generate_oos_validation_analysis(connection):
 # OOS ROBUSTNESS ANALYSIS v0.8
 # ============================================================
 
-def generate_oos_robustness_analysis(connection):
-
-    OOS_START = "2025-07-28 17:00:00"
+def generate_oos_robustness_analysis(connection, oos_start):
 
     BOOTSTRAP_ITERATIONS = 2000
     RANDOM_SEED = 42
@@ -3608,12 +3626,17 @@ def generate_oos_robustness_analysis(connection):
         df["timestamp"]
     )
 
+    split_time = resolve_oos_split(df, oos_start, "OOS robustness analysis")
+    if split_time is None:
+        print("=" * 110)
+        return
+
     # --------------------------------------------------------
     # Frozen chronological OOS period
     # --------------------------------------------------------
 
     oos_df = df[
-        df["timestamp"] >= OOS_START
+        df["timestamp"] >= split_time
     ].copy()
 
     if oos_df.empty:
@@ -4064,7 +4087,7 @@ def generate_oos_robustness_analysis(connection):
 
     print(
         "OOS start remains fixed at:",
-        OOS_START
+        split_time
     )
 
     print(
@@ -4128,6 +4151,14 @@ def _parse_arguments():
         action="store_true",
         help="Run both v0.9 studies after the v0.8 baseline.",
     )
+    parser.add_argument(
+        "--oos-start",
+        default=DEFAULT_OOS_START,
+        help=(
+            "Frozen chronological OOS start (YYYY-MM-DD or timestamp). "
+            "The engine safely skips OOS reports when it is outside the data range."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -4183,17 +4214,21 @@ def main():
         )
 
         generate_oos_validation_analysis(
-            connection
+            connection,
+            arguments.oos_start,
         )
         generate_oos_stability_analysis(
-            connection
+            connection,
+            arguments.oos_start,
         )
         generate_oos_regime_score_analysis(
-            connection
+            connection,
+            arguments.oos_start,
         )
 
         generate_oos_robustness_analysis(
-            connection
+            connection,
+            arguments.oos_start,
         )
         generate_regime_analysis(
             connection
@@ -4237,9 +4272,7 @@ def main():
 # OOS STABILITY ANALYSIS v0.6
 # ============================================================
 
-def generate_oos_stability_analysis(connection):
-
-    OOS_START = "2025-07-28 17:00:00"
+def generate_oos_stability_analysis(connection, oos_start):
 
     query = """
         SELECT
@@ -4281,8 +4314,13 @@ def generate_oos_stability_analysis(connection):
     # Keep only the frozen OOS period.
     # --------------------------------------------------------
 
+    split_time = resolve_oos_split(df, oos_start, "OOS stability analysis")
+    if split_time is None:
+        print("=" * 110)
+        return
+
     oos_df = df.loc[
-        df["timestamp"] >= pd.Timestamp(OOS_START)
+        df["timestamp"] >= split_time
     ].copy()
 
     if oos_df.empty:
