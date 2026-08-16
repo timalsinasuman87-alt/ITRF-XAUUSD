@@ -25,7 +25,6 @@ DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "XAUUSD.csv"
 BAR_MILLISECONDS = 15 * 60 * 1000
 TICK_SIZE = struct.calcsize(">IIIff")
 PRICE_SCALE = 1_000.0
-USER_AGENT = "ITRF-XAUUSD-research/0.9 (historical research)"
 
 
 def hour_url(symbol: str, hour: datetime) -> str:
@@ -47,7 +46,7 @@ def decode_ticks(payload: bytes) -> Iterable[tuple[int, float, float, float]]:
 
 
 def download_hour(symbol: str, hour: datetime, retries: int) -> bytes | None:
-    request = Request(hour_url(symbol, hour), headers={"User-Agent": USER_AGENT})
+    request = Request(hour_url(symbol, hour))
     for attempt in range(retries + 1):
         try:
             with urlopen(request, timeout=30) as response:
@@ -63,6 +62,11 @@ def download_hour(symbol: str, hour: datetime, retries: int) -> bytes | None:
                 continue
             raise RuntimeError(f"Dukascopy returned HTTP {error.code} for {hour_url(symbol, hour)}") from error
         except URLError as error:
+            if attempt < retries:
+                delay = 10.0 * (attempt + 1)
+                print(f"Temporary source connection failure; waiting {delay:.0f} seconds before retrying.")
+                time.sleep(delay)
+                continue
             raise RuntimeError(f"Could not download {hour_url(symbol, hour)}: {error.reason}") from error
     raise AssertionError("The retry loop must return or raise.")
 
