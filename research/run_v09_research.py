@@ -7,17 +7,24 @@ creates a separate SQLite database at ``database/itrf_v09_research.db``.
 from __future__ import annotations
 
 import sqlite3
+import argparse
 from pathlib import Path
 
 import pandas as pd
 
 from itrf_context import create_context_features
-from itrf_research import FORWARD_BARS, create_features, evaluate_forward_path, load_market_data
+from itrf_research import (
+    DEFAULT_OOS_START,
+    FORWARD_BARS,
+    create_features,
+    evaluate_forward_path,
+    load_market_data,
+    resolve_oos_split,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATABASE_FILE = PROJECT_ROOT / "database" / "itrf_v09_research.db"
-OOS_START = pd.Timestamp("2025-07-28 17:00:00")  # preserved from the v0.8 validation boundary
 MINIMUM_HISTORY = 250
 
 
@@ -107,27 +114,44 @@ def _summary_query(where: str = "", params: tuple = ()) -> pd.DataFrame:
         return pd.read_sql_query(query, connection, params=params)
 
 
-def print_report() -> None:
+def print_report(oos_start: str, available_data: pd.DataFrame) -> None:
     """Print descriptive in-sample/OOS summaries without selecting a winner."""
     print("\n" + "=" * 92)
     print("ITRF v0.9 CONTEXT STUDY — DESCRIPTIVE RESEARCH ONLY")
     print("=" * 92)
     print("\nAll candidates (descriptive; do not select rules from this table):")
     print(_summary_query().to_string(index=False))
-    print("\nFrozen v0.8 OOS boundary onward (descriptive; no parameter changes):")
-    oos = _summary_query("WHERE timestamp >= ?", (str(OOS_START),))
-    print(oos.to_string(index=False) if not oos.empty else "No observations after the OOS boundary.")
+    split_time = resolve_oos_split(
+        available_data.rename(columns={"time": "timestamp"}),
+        oos_start,
+        "v0.9 context OOS report",
+    )
+    if split_time is not None:
+        print(f"\nFrozen OOS boundary onward ({split_time}; descriptive; no parameter changes):")
+        oos = _summary_query("WHERE timestamp >= ?", (str(split_time),))
+        print(oos.to_string(index=False) if not oos.empty else "No observations after the OOS boundary.")
     print("\nImportant: results are labels on historical bars, not proof of profitability.")
     print("Costs, slippage, contract multiplier, execution constraints, and overlapping positions are not modelled.")
 
 
+def _parse_arguments():
+    parser = argparse.ArgumentParser(description="Run ITRF v0.9 context research.")
+    parser.add_argument(
+        "--oos-start",
+        default=DEFAULT_OOS_START,
+        help="Frozen chronological OOS start. Invalid boundaries safely skip the split report.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    arguments = _parse_arguments()
     df = create_context_features(create_features(load_market_data()))
     with sqlite3.connect(DATABASE_FILE) as connection:
         count = build_context_observations(df, connection)
     print(f"v0.9 context candidates written: {count:,}")
     print(f"Database: {DATABASE_FILE}")
-    print_report()
+    print_report(arguments.oos_start, df)
 
 
 if __name__ == "__main__":

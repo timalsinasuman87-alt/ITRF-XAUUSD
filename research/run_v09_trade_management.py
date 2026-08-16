@@ -8,13 +8,20 @@ from pathlib import Path
 
 import pandas as pd
 
-from itrf_research import FORWARD_BARS, RISK_ATR, create_features, detect_setup, load_market_data
+from itrf_research import (
+    DEFAULT_OOS_START,
+    FORWARD_BARS,
+    RISK_ATR,
+    create_features,
+    detect_setup,
+    load_market_data,
+    resolve_oos_split,
+)
 from itrf_trade_management import MODELS, TradeCostConfig, cost_in_r, evaluate_exit_model, summarize_models
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATABASE_FILE = PROJECT_ROOT / "database" / "itrf_v09_trade_management.db"
 MINIMUM_HISTORY = 250
-OOS_START = pd.Timestamp("2025-07-28 17:00:00")
 
 
 def build_exit_observations(df: pd.DataFrame, costs: TradeCostConfig = TradeCostConfig()) -> pd.DataFrame:
@@ -55,6 +62,11 @@ def _parse_arguments():
     parser.add_argument("--slippage-price-per-side", type=float, default=0.0)
     parser.add_argument("--commission-per-contract-per-side", type=float, default=0.0)
     parser.add_argument("--contract-multiplier", type=float, default=1.0)
+    parser.add_argument(
+        "--oos-start",
+        default=DEFAULT_OOS_START,
+        help="Frozen chronological OOS start. Invalid boundaries safely skip the split report.",
+    )
     # Allows this runner to be called by itrf_research.py after its own flags.
     return parser.parse_known_args()[0]
 
@@ -70,12 +82,15 @@ def main() -> None:
     if observations.empty:
         print("No v0.8 entry candidates were available.")
     else:
-        print("\nIn-sample (before frozen v0.8 OOS boundary):")
-        in_sample = observations.loc[pd.to_datetime(observations["timestamp"]) < OOS_START]
-        print(summarize_models(in_sample).round(3).to_string(index=False) if not in_sample.empty else "No in-sample trades.")
-        print("\nFrozen OOS (boundary onward):")
-        oos = observations.loc[pd.to_datetime(observations["timestamp"]) >= OOS_START]
-        print(summarize_models(oos).round(3).to_string(index=False) if not oos.empty else "No OOS trades.")
+        observations["timestamp"] = pd.to_datetime(observations["timestamp"])
+        split_time = resolve_oos_split(observations, arguments.oos_start, "v0.9 exit-model OOS report")
+        if split_time is not None:
+            print(f"\nIn-sample (before frozen OOS boundary {split_time}):")
+            in_sample = observations.loc[observations["timestamp"] < split_time]
+            print(summarize_models(in_sample).round(3).to_string(index=False) if not in_sample.empty else "No in-sample trades.")
+            print("\nFrozen OOS (boundary onward):")
+            oos = observations.loc[observations["timestamp"] >= split_time]
+            print(summarize_models(oos).round(3).to_string(index=False) if not oos.empty else "No OOS trades.")
     print(f"\nDatabase: {DATABASE_FILE}")
     print(f"Costs: spread={costs.spread_price}, slippage/side={costs.slippage_price_per_side}, commission/contract/side={costs.commission_per_contract_per_side}, multiplier={costs.contract_multiplier}")
     print("Max drawdown uses net R on a one-position-at-a-time sequential trade curve.")
