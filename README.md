@@ -79,6 +79,21 @@ python research/itrf_research.py
 
 The final command deliberately stops with clear instructions until you add a real CSV file as `data/XAUUSD.csv`.
 
+### Free-data option
+
+If you do not have a broker or TradingView CSV export, the project can download
+and aggregate public Dukascopy XAU/USD ticks into its required 15-minute CSV.
+For example, the following creates `data/XAUUSD.csv` in UTC:
+
+```bash
+python research/download_dukascopy.py --start 2026-05-01 --end 2026-08-15
+```
+
+The downloader is reproducible and refuses to overwrite an existing data file
+unless `--overwrite` is supplied. It is research data only: its tick-side
+volume and fills will not match a broker's CFD feed, so results must not be
+treated as execution or profitability evidence.
+
 ## Data format
 
 The CSV must contain these columns (capitalization does not matter):
