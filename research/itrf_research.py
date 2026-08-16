@@ -4119,6 +4119,12 @@ def _parse_arguments():
         help="Separate SQLite output for the v0.9 exit-model study.",
     )
     parser.add_argument(
+        "--v091-database-file",
+        type=Path,
+        default=PROJECT_ROOT / "database" / "itrf_v091_research.db",
+        help="Separate SQLite output for the v0.9.1 causal context study.",
+    )
+    parser.add_argument(
         "--v09-context",
         action="store_true",
         help="Run the isolated v0.9 market-context study after the v0.8 baseline.",
@@ -4132,6 +4138,11 @@ def _parse_arguments():
         "--v09-all",
         action="store_true",
         help="Run both v0.9 studies after the v0.8 baseline.",
+    )
+    parser.add_argument(
+        "--v091-context",
+        action="store_true",
+        help="Run the pre-registered v0.9.1 causal context diagnostic after v0.8.",
     )
     parser.add_argument(
         "--oos-start",
@@ -4257,6 +4268,15 @@ def main():
             data_file=arguments.data_file,
             database_file=arguments.v09_trade_management_database_file,
             oos_start=arguments.oos_start,
+        )
+
+    if arguments.v091_context:
+        from run_v091_research import main as run_v091_context_study
+
+        print("\nRunning v0.9.1 causal context diagnostic in its separate database...")
+        run_v091_context_study(
+            data_file=arguments.data_file,
+            database_file=arguments.v091_database_file,
         )
 
 # ============================================================

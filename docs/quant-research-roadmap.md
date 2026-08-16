@@ -38,3 +38,11 @@ The next increment is a pre-registered causal event sequence: map liquidity,
 arm a setup after a sweep, then wait for later BOS/CHoCH and entry confirmation.
 The time horizon must be frozen before an unseen validation period is reserved;
 it must not be selected from the Databento result.
+
+Version 0.9.1 implemented that frozen sequence with an eight-bar confirmation
+window and matching Python/Pine state transitions. It produced workable sample
+counts, but both directions were negative on Databento and every chronological
+Databento development quarter was negative. A small long/uptrend cohort was
+positive in aggregate across two development feeds but failed in the newest
+Databento quarter, so it is not promoted. The next research module must add a
+genuinely different information source rather than tune this state machine.

@@ -1,5 +1,5 @@
 //@version=5
-indicator("ITRF XAUUSD v0.9 Context Reference (Research Only)", overlay=true, max_labels_count=500)
+indicator("ITRF XAUUSD v0.9.1 Causal Context Reference (Research Only)", overlay=true, max_labels_count=500)
 
 // This is a visual parity reference, not a profitable strategy claim or an order system.
 swingLength = input.int(3, "Confirmed swing length", minval=1)
@@ -7,6 +7,7 @@ liquidityLookback = input.int(20, "External liquidity lookback", minval=2)
 regimeLookback = input.int(100, "ATR-percent median lookback", minval=10)
 bodyThreshold = input.float(0.60, "Displacement body ratio", minval=0, maxval=1)
 rangeAtrThreshold = input.float(1.00, "Displacement range / ATR", minval=0)
+confirmationWindowBars = 8  // Frozen v0.9.1 definition: two hours on a 15-minute chart.
 
 atr = ta.sma(ta.tr, 14)
 ema50 = ta.ema(close, 50)
@@ -21,8 +22,8 @@ ph = ta.pivothigh(high, swingLength, swingLength)
 pl = ta.pivotlow(low, swingLength, swingLength)
 lastSwingHigh = ta.valuewhen(not na(ph), ph, 0)
 lastSwingLow = ta.valuewhen(not na(pl), pl, 0)
-bullishBos = not na(lastSwingHigh) and close > lastSwingHigh
-bearishBos = not na(lastSwingLow) and close < lastSwingLow
+bullishBos = not na(lastSwingHigh) and close > lastSwingHigh and close[1] <= lastSwingHigh
+bearishBos = not na(lastSwingLow) and close < lastSwingLow and close[1] >= lastSwingLow
 var int structureBias = 0
 bullishChoch = bullishBos and structureBias == -1
 bearishChoch = bearishBos and structureBias == 1
@@ -45,15 +46,69 @@ bodyRatio = candleRange > 0 ? math.abs(close - open) / candleRange : 0.0
 rangeAtr = atr > 0 ? candleRange / atr : 0.0
 bullishDisplacement = close > open and bodyRatio >= bodyThreshold and rangeAtr >= rangeAtrThreshold
 bearishDisplacement = close < open and bodyRatio >= bodyThreshold and rangeAtr >= rangeAtrThreshold
-longConfirmation = sellSideSweep and discount and (bullishBos or bullishChoch) and bullishDisplacement
-shortConfirmation = buySideSweep and premium and (bearishBos or bearishChoch) and bearishDisplacement
+longArm = sellSideSweep and discount
+shortArm = buySideSweep and premium
+
+// v0.9.1 single-state causal sequence. New qualifying sweeps take precedence,
+// so an arming bar can never also become a confirmation bar.
+var int contextState = 0  // 1 long armed, -1 short armed, 0 flat.
+var int armedBar = na
+var float sweepExtreme = na
+var int sourceSweepTime = na
+bool v091Invalidation = false
+bool v091Expiration = false
+bool v091Replacement = false
+bool v091LongConfirmation = false
+bool v091ShortConfirmation = false
+int v091ConfirmationLag = na
+int confirmedSweepTime = na
+float confirmedSweepExtreme = na
+
+if longArm != shortArm
+    v091Replacement := contextState != 0
+    contextState := longArm ? 1 : -1
+    armedBar := bar_index
+    sweepExtreme := longArm ? low : high
+    sourceSweepTime := time
+else if longArm and shortArm
+    v091Replacement := contextState != 0
+    contextState := 0
+    armedBar := na
+    sweepExtreme := na
+    sourceSweepTime := na
+else if contextState != 0 and not na(armedBar) and not na(sweepExtreme)
+    barsSinceSweep = bar_index - armedBar
+    breached = (contextState == 1 and close < sweepExtreme) or (contextState == -1 and close > sweepExtreme)
+    if breached
+        v091Invalidation := true
+        contextState := 0
+    else
+        bullishConfirmationEvent = (bullishBos or bullishChoch) and bullishDisplacement
+        bearishConfirmationEvent = (bearishBos or bearishChoch) and bearishDisplacement
+        validConfirmation = barsSinceSweep >= 1 and barsSinceSweep <= confirmationWindowBars
+        if validConfirmation and ((contextState == 1 and bullishConfirmationEvent) or (contextState == -1 and bearishConfirmationEvent))
+            v091LongConfirmation := contextState == 1
+            v091ShortConfirmation := contextState == -1
+            v091ConfirmationLag := barsSinceSweep
+            confirmedSweepTime := sourceSweepTime
+            confirmedSweepExtreme := sweepExtreme
+            contextState := 0
+        else if barsSinceSweep >= confirmationWindowBars
+            v091Expiration := true
+            contextState := 0
+    if contextState == 0
+        armedBar := na
+        sweepExtreme := na
+        sourceSweepTime := na
 
 plot(ema50, "EMA 50", color=color.teal)
 plot(ema200, "EMA 200", color=color.orange)
 plot(lastSwingHigh, "Confirmed swing high", color=color.new(color.red, 30), style=plot.style_linebr)
 plot(lastSwingLow, "Confirmed swing low", color=color.new(color.green, 30), style=plot.style_linebr)
 plot(validRange ? midpoint : na, "Premium/discount midpoint", color=color.gray, style=plot.style_linebr)
-plotshape(longConfirmation, title="Long research candidate", text="L?", style=shape.labelup, color=color.new(color.green, 0), textcolor=color.white, location=location.belowbar)
-plotshape(shortConfirmation, title="Short research candidate", text="S?", style=shape.labeldown, color=color.new(color.red, 0), textcolor=color.white, location=location.abovebar)
+plotshape(longArm, title="Long context armed", text="LA", style=shape.circle, color=color.new(color.green, 55), location=location.belowbar, size=size.tiny)
+plotshape(shortArm, title="Short context armed", text="SA", style=shape.circle, color=color.new(color.red, 55), location=location.abovebar, size=size.tiny)
+plotshape(v091LongConfirmation, title="v0.9.1 long research candidate", text="L?", style=shape.labelup, color=color.new(color.green, 0), textcolor=color.white, location=location.belowbar)
+plotshape(v091ShortConfirmation, title="v0.9.1 short research candidate", text="S?", style=shape.labeldown, color=color.new(color.red, 0), textcolor=color.white, location=location.abovebar)
 plotshape(bullishChoch, title="Bullish CHoCH", text="CH+", style=shape.circle, color=color.green, location=location.belowbar, size=size.tiny)
 plotshape(bearishChoch, title="Bearish CHoCH", text="CH-", style=shape.circle, color=color.red, location=location.abovebar, size=size.tiny)

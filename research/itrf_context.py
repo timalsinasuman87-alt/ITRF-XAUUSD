@@ -22,6 +22,7 @@ class ContextConfig:
     regime_lookback: int = 100
     displacement_body_ratio: float = 0.60
     displacement_range_atr: float = 1.00
+    confirmation_window_bars: int = 8
     stop_atr_buffer: float = 0.10
     account_risk_fraction: float = 0.005
 
@@ -41,10 +42,18 @@ def _confirmed_swings(df: pd.DataFrame, length: int) -> tuple[pd.Series, pd.Seri
 
 
 def _structure_events(df: pd.DataFrame) -> pd.DataFrame:
-    """Classify close-confirmed BOS and CHoCH using only known swing levels."""
+    """Classify first close-cross BOS/CHoCH events using known swing levels."""
     result = pd.DataFrame(index=df.index)
-    bullish_bos = (df["close"] > df["swing_high_level"]) & df["swing_high_level"].notna()
-    bearish_bos = (df["close"] < df["swing_low_level"]) & df["swing_low_level"].notna()
+    bullish_bos = (
+        (df["close"] > df["swing_high_level"])
+        & (df["close"].shift(1) <= df["swing_high_level"])
+        & df["swing_high_level"].notna()
+    )
+    bearish_bos = (
+        (df["close"] < df["swing_low_level"])
+        & (df["close"].shift(1) >= df["swing_low_level"])
+        & df["swing_low_level"].notna()
+    )
 
     bias = []
     bullish_choch = []
@@ -64,6 +73,130 @@ def _structure_events(df: pd.DataFrame) -> pd.DataFrame:
     result["structure_bias"] = bias
     result["bullish_choch"] = bullish_choch
     result["bearish_choch"] = bearish_choch
+    return result
+
+
+def apply_v091_state_machine(
+    df: pd.DataFrame,
+    config: ContextConfig = ContextConfig(),
+) -> pd.DataFrame:
+    """Sequence sweep arming and later structure/displacement confirmation."""
+    if config.confirmation_window_bars < 1:
+        raise ValueError("confirmation_window_bars must be at least 1.")
+    required = {
+        "close", "low", "high", "sell_side_sweep", "buy_side_sweep",
+        "discount", "premium", "bullish_bos", "bearish_bos", "bullish_choch",
+        "bearish_choch", "bullish_displacement", "bearish_displacement",
+    }
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing v0.9 state-machine columns: {sorted(missing)}")
+
+    result = df.copy()
+    output = {
+        "v091_long_arm": [],
+        "v091_short_arm": [],
+        "v091_invalidation": [],
+        "v091_expiration": [],
+        "v091_replacement": [],
+        "v091_long_confirmation": [],
+        "v091_short_confirmation": [],
+        "v091_context_signal": [],
+        "v091_confirmation_lag": [],
+        "v091_source_sweep_time": [],
+        "v091_source_sweep_extreme": [],
+        "v091_state": [],
+    }
+    state_side: str | None = None
+    armed_index: int | None = None
+    sweep_extreme: float | None = None
+    sweep_time = None
+    event_times = result["time"].tolist() if "time" in result.columns else [pd.NaT] * len(result)
+
+    for position, row in enumerate(result.itertuples(index=False)):
+        long_arm = bool(row.sell_side_sweep == 1 and row.discount == 1)
+        short_arm = bool(row.buy_side_sweep == 1 and row.premium == 1)
+        invalidated = 0
+        expired = 0
+        replaced = 0
+        long_confirmation = 0
+        short_confirmation = 0
+        signal = "NONE"
+        confirmation_lag = pd.NA
+        source_sweep_time = pd.NaT
+        source_sweep_extreme = np.nan
+
+        # Qualifying new information replaces the old context and cannot also
+        # confirm on the same completed bar.
+        if long_arm ^ short_arm:
+            if state_side is not None:
+                replaced = 1
+            state_side = "LONG" if long_arm else "SHORT"
+            armed_index = position
+            sweep_extreme = float(row.low if long_arm else row.high)
+            sweep_time = event_times[position]
+        elif long_arm and short_arm:
+            if state_side is not None:
+                replaced = 1
+            state_side = None
+            armed_index = None
+            sweep_extreme = None
+            sweep_time = None
+        elif state_side is not None and armed_index is not None and sweep_extreme is not None:
+            age = position - armed_index
+            breached = (
+                (state_side == "LONG" and float(row.close) < sweep_extreme)
+                or (state_side == "SHORT" and float(row.close) > sweep_extreme)
+            )
+            if breached:
+                invalidated = 1
+                state_side = None
+            else:
+                bullish_confirmation = bool(
+                    (row.bullish_bos == 1 or row.bullish_choch == 1)
+                    and row.bullish_displacement == 1
+                )
+                bearish_confirmation = bool(
+                    (row.bearish_bos == 1 or row.bearish_choch == 1)
+                    and row.bearish_displacement == 1
+                )
+                if 1 <= age <= config.confirmation_window_bars and (
+                    (state_side == "LONG" and bullish_confirmation)
+                    or (state_side == "SHORT" and bearish_confirmation)
+                ):
+                    signal = state_side
+                    long_confirmation = int(state_side == "LONG")
+                    short_confirmation = int(state_side == "SHORT")
+                    confirmation_lag = age
+                    source_sweep_time = sweep_time
+                    source_sweep_extreme = sweep_extreme
+                    state_side = None
+                elif age >= config.confirmation_window_bars:
+                    expired = 1
+                    state_side = None
+
+            if state_side is None:
+                armed_index = None
+                sweep_extreme = None
+                sweep_time = None
+
+        output["v091_long_arm"].append(int(long_arm))
+        output["v091_short_arm"].append(int(short_arm))
+        output["v091_invalidation"].append(invalidated)
+        output["v091_expiration"].append(expired)
+        output["v091_replacement"].append(replaced)
+        output["v091_long_confirmation"].append(long_confirmation)
+        output["v091_short_confirmation"].append(short_confirmation)
+        output["v091_context_signal"].append(signal)
+        output["v091_confirmation_lag"].append(confirmation_lag)
+        output["v091_source_sweep_time"].append(source_sweep_time)
+        output["v091_source_sweep_extreme"].append(source_sweep_extreme)
+        output["v091_state"].append("FLAT" if state_side is None else f"{state_side}_ARMED")
+
+    for column, values in output.items():
+        result[column] = values
+    result["v091_confirmation_lag"] = pd.array(result["v091_confirmation_lag"], dtype="Int64")
+    result["v091_source_sweep_time"] = pd.to_datetime(result["v091_source_sweep_time"])
     return result
 
 
@@ -125,7 +258,7 @@ def create_context_features(
         ["LONG", "SHORT"],
         default="NONE",
     )
-    return result
+    return apply_v091_state_machine(result, config)
 
 
 def build_trade_plan(row: pd.Series, account_equity: float, config: ContextConfig = ContextConfig()) -> dict[str, float | str]:
@@ -135,16 +268,23 @@ def build_trade_plan(row: pd.Series, account_equity: float, config: ContextConfi
     broker contract multiplier, spread, slippage, commissions and lot limits
     must be applied separately before this is used for execution.
     """
-    direction = str(row["context_signal"])
+    direction = str(row.get("v091_context_signal", row.get("context_signal", "NONE")))
     if direction == "NONE" or account_equity <= 0 or not np.isfinite(row["atr"]):
         return {"direction": "NONE", "entry": np.nan, "stop": np.nan, "risk_per_unit": np.nan, "units": 0.0}
 
     entry = float(row["close"])
     buffer = float(row["atr"]) * config.stop_atr_buffer
+    sweep_extreme = row.get("v091_source_sweep_extreme", np.nan)
     if direction == "LONG":
-        stop = min(float(row["low"]), float(row["swing_low_level"])) - buffer
+        stop_candidates = [float(row["low"]), float(row["swing_low_level"])]
+        if np.isfinite(sweep_extreme):
+            stop_candidates.append(float(sweep_extreme))
+        stop = min(stop_candidates) - buffer
     else:
-        stop = max(float(row["high"]), float(row["swing_high_level"])) + buffer
+        stop_candidates = [float(row["high"]), float(row["swing_high_level"])]
+        if np.isfinite(sweep_extreme):
+            stop_candidates.append(float(sweep_extreme))
+        stop = max(stop_candidates) + buffer
     risk_per_unit = abs(entry - stop)
     units = (account_equity * config.account_risk_fraction / risk_per_unit) if risk_per_unit > 0 else 0.0
     return {"direction": direction, "entry": entry, "stop": stop, "risk_per_unit": risk_per_unit, "units": units}
