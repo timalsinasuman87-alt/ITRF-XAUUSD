@@ -26,8 +26,15 @@ in-sample results.
 
 ## Current checkpoint
 
-The v0.8 baseline and v0.9 research architecture are retained. The available
-short HistData sample passed structural data checks but did not validate a
-general v0.8 entry edge. This is a research finding, not a reason to tune the
-strategy toward that sample. The next work focuses on longer independent data
-and pre-declared structure/liquidity hypotheses.
+The v0.8 baseline and v0.9 research architecture are retained. The short
+HistData sample did not validate a general v0.8 entry edge. A longer Databento
+CME Gold futures check produced a slightly positive aggregate OOS forward-label
+average before costs, but the newest chronological quarter was negative and
+the executable exit-model margins were small. This is not a validated edge.
+
+The strict v0.9 same-bar context conjunction produced zero candidates because
+a sweep-plus-location bar never also produced the required structure break.
+The next increment is a pre-registered causal event sequence: map liquidity,
+arm a setup after a sweep, then wait for later BOS/CHoCH and entry confirmation.
+The time horizon must be frozen before an unseen validation period is reserved;
+it must not be selected from the Databento result.

@@ -28,6 +28,42 @@ DATABASE_FILE = PROJECT_ROOT / "database" / "itrf_v09_research.db"
 MINIMUM_HISTORY = 250
 
 
+def context_gate_funnel(df: pd.DataFrame) -> pd.DataFrame:
+    """Count individual and cumulative frozen gates without changing them."""
+    eligible = df.iloc[MINIMUM_HISTORY: len(df) - FORWARD_BARS - 1]
+    rows = []
+    definitions = {
+        "LONG": {
+            "sweep": eligible["sell_side_sweep"].eq(1),
+            "location": eligible["discount"].eq(1),
+            "structure": eligible["bullish_bos"].eq(1) | eligible["bullish_choch"].eq(1),
+            "displacement": eligible["bullish_displacement"].eq(1),
+        },
+        "SHORT": {
+            "sweep": eligible["buy_side_sweep"].eq(1),
+            "location": eligible["premium"].eq(1),
+            "structure": eligible["bearish_bos"].eq(1) | eligible["bearish_choch"].eq(1),
+            "displacement": eligible["bearish_displacement"].eq(1),
+        },
+    }
+    for side, gates in definitions.items():
+        sweep_location = gates["sweep"] & gates["location"]
+        through_structure = sweep_location & gates["structure"]
+        all_gates = through_structure & gates["displacement"]
+        rows.append({
+            "side": side,
+            "eligible_bars": len(eligible),
+            "sweep": int(gates["sweep"].sum()),
+            "location": int(gates["location"].sum()),
+            "structure": int(gates["structure"].sum()),
+            "displacement": int(gates["displacement"].sum()),
+            "sweep_and_location": int(sweep_location.sum()),
+            "plus_same_bar_structure": int(through_structure.sum()),
+            "all_confirmation_gates": int(all_gates.sum()),
+        })
+    return pd.DataFrame(rows)
+
+
 def _create_table(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
@@ -157,6 +193,8 @@ def main(data_file=None, database_file=None, oos_start=None) -> None:
     selected_database_file = Path(database_file or arguments.database_file or DATABASE_FILE)
     selected_oos_start = oos_start or arguments.oos_start
     df = create_context_features(create_features(load_market_data(selected_data_file)))
+    print("v0.9 frozen context-gate funnel:")
+    print(context_gate_funnel(df).to_string(index=False))
     selected_database_file.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(selected_database_file) as connection:
         count = build_context_observations(df, connection)

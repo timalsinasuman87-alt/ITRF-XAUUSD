@@ -13,7 +13,7 @@ from itrf_research import (
     load_market_data,
     validate_market_data,
 )
-from run_v09_research import build_context_observations
+from run_v09_research import build_context_observations, context_gate_funnel
 from itrf_trade_management import ExitModel, TradeCostConfig, cost_in_r, evaluate_exit_model, summarize_models
 from run_v09_trade_management import build_exit_observations
 
@@ -72,6 +72,17 @@ class ContextFeatureTests(unittest.TestCase):
             count = build_context_observations(context, connection)
             stored = connection.execute("SELECT COUNT(*) FROM v09_context_observations").fetchone()[0]
         self.assertEqual(count, stored)
+
+    def test_context_funnel_final_gate_matches_context_signals(self):
+        frame = pd.concat([_base_frame()] * 5, ignore_index=True)
+        frame["volume"] = 100.0
+        frame["time"] = pd.date_range("2025-01-01", periods=len(frame), freq="15min")
+        context = create_context_features(create_features(frame))
+        funnel = context_gate_funnel(context).set_index("side")
+        eligible = context.iloc[250: len(context) - 32 - 1]
+
+        self.assertEqual(funnel.loc["LONG", "all_confirmation_gates"], int(eligible["long_confirmation"].sum()))
+        self.assertEqual(funnel.loc["SHORT", "all_confirmation_gates"], int(eligible["short_confirmation"].sum()))
 
     def test_break_even_stop_applies_on_the_bar_after_one_r_is_reached(self):
         frame = pd.DataFrame({"high": [101.1, 100.2], "low": [100.0, 99.8], "close": [100.8, 100.0], "atr": [1.0, 1.0]})
