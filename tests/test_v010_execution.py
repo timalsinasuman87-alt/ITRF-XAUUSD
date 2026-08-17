@@ -7,6 +7,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 
 from itrf_execution import BracketPolicy, deduct_cost_r, simulate_bracket_trade
+import run_v010_clean_baseline
+from run_v010_clean_baseline import build_candidate_ledger
 
 
 def frame(rows: list[dict[str, float]]) -> pd.DataFrame:
@@ -73,3 +75,55 @@ def test_invalid_policy_and_cost_are_rejected() -> None:
         simulate_bracket_trade(data, 0, "FLAT", 1.0)
     with pytest.raises(ValueError, match="round_trip_cost_r"):
         deduct_cost_r(pd.Series([1.0]), -0.1)
+
+
+def test_candidate_without_full_horizon_is_right_censored() -> None:
+    rows = 283
+    data = frame(
+        [{"open": 100, "high": 101, "low": 99, "close": 100} for _ in range(rows)]
+    )
+    data["atr"] = 1.0
+    data["trend"] = 0
+    data["momentum_atr"] = 0.0
+    data["delta_zscore"] = 0.0
+    data["relative_volume"] = 0.0
+    data["delta_proxy"] = 0.0
+    data["bullish_sweep"] = 0
+    data["bearish_sweep"] = 0
+    data.loc[251, ["trend", "momentum_atr", "delta_zscore", "relative_volume", "delta_proxy"]] = [
+        1, 1.0, 2.0, 2.0, 10.0
+    ]
+    ledger = build_candidate_ledger(data)
+    assert ledger.loc[0, "decision"] == "REJECTED_INCOMPLETE_HORIZON"
+
+
+def test_signal_on_exit_bar_can_enter_on_following_bar(monkeypatch) -> None:
+    rows = 300
+    data = frame(
+        [{"open": 100, "high": 100, "low": 100, "close": 100} for _ in range(rows)]
+    )
+    data["atr"] = 1.0
+    data.loc[[251, 252], "high"] = 105.0
+    monkeypatch.setattr(
+        run_v010_clean_baseline,
+        "detect_setup",
+        lambda row: "LONG" if row.name in {250, 251} else "NONE",
+    )
+    ledger = build_candidate_ledger(data)
+    assert ledger["decision"].tolist() == ["ACCEPTED", "ACCEPTED"]
+    assert ledger["entry_index"].tolist() == [251, 252]
+
+
+def test_candidate_during_open_position_is_rejected(monkeypatch) -> None:
+    rows = 300
+    data = frame(
+        [{"open": 100, "high": 100, "low": 100, "close": 100} for _ in range(rows)]
+    )
+    data["atr"] = 1.0
+    monkeypatch.setattr(
+        run_v010_clean_baseline,
+        "detect_setup",
+        lambda row: "LONG" if row.name in {250, 251} else "NONE",
+    )
+    ledger = build_candidate_ledger(data)
+    assert ledger["decision"].tolist() == ["ACCEPTED", "REJECTED_POSITION_OPEN"]

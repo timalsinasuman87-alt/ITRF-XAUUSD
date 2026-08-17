@@ -42,6 +42,9 @@ def build_candidate_ledger(
         if signal_index + 1 >= len(frame):
             records.append({**base, "decision": "REJECTED_NO_ENTRY_BAR"})
             continue
+        if signal_index + policy.maximum_holding_bars >= len(frame):
+            records.append({**base, "decision": "REJECTED_INCOMPLETE_HORIZON"})
+            continue
         if signal_index < next_eligible_signal_index:
             records.append({**base, "decision": "REJECTED_POSITION_OPEN"})
             continue
@@ -86,6 +89,26 @@ def print_report(ledger: pd.DataFrame) -> None:
         return
     print("\nExit reasons:")
     print(accepted["exit_reason"].value_counts().rename_axis("exit_reason").to_string())
+    direction = accepted.groupby("direction", sort=False).agg(
+        trades=("gross_r_lower", "size"),
+        average_gross_r=("gross_r_lower", "mean"),
+        stopped_pct=("exit_reason", lambda values: 100.0 * values.eq("STOP").mean()),
+        target_pct=("exit_reason", lambda values: 100.0 * values.eq("TARGET").mean()),
+    ).reset_index()
+    print("\nDirection diagnostic:")
+    print(direction.round(3).to_string(index=False))
+
+    accepted = accepted.reset_index(drop=True)
+    quarter_codes = (pd.Series(range(len(accepted))) * 4 // len(accepted)).clip(upper=3)
+    accepted["chronological_quarter"] = pd.Categorical.from_codes(
+        quarter_codes.astype(int), ["Q1", "Q2", "Q3", "Q4"], ordered=True
+    )
+    chronological = accepted.groupby("chronological_quarter", observed=True).agg(
+        trades=("gross_r_lower", "size"),
+        average_gross_r=("gross_r_lower", "mean"),
+    ).reset_index()
+    print("\nChronological diagnostic:")
+    print(chronological.round(3).to_string(index=False))
     rows = []
     for cost_r in (0.0, 0.05, 0.10):
         for label, column in (
