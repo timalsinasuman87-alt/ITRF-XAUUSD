@@ -136,3 +136,16 @@ rules to this inspected history and return to an entry-architecture and
 information-set review. Any genuinely new causal hypothesis must be frozen
 before a new chronological XAU/USD period is observed; calibration accuracy is
 not itself a strategic edge.
+
+Version 0.10.7 returned to entry information and tested one model-free external
+confirmation: accept a v0.8 XAU/USD signal only when the just-completed CME
+Gold futures candle closed in the same direction. Independent sequencing
+produced 125 development trades and 626 backward-external trades. The older
+interval was descriptively positive after costs, but its 0.05R-cost confidence
+interval still touched zero. More decisively, the newer development interval
+averaged -0.37633R after 0.05R cost with a wholly negative 95% interval of
+[-0.55824R, -0.18462R], and both development halves were negative. The exact
+sign gate failed and is quarantined. The older positive slice must not be
+selected or used to tune candle magnitude, direction, session, or lag. Before
+another entry rule, the project requires a non-trading cross-period invariance
+audit of spot/futures alignment, rolls, and price-discovery stability.
