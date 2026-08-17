@@ -100,3 +100,14 @@ block-bootstrap 95% interval of [-0.01689, 0.02571] and was negative in two of
 three folds. Path state is promising but not validated, and no management rule
 is promoted. The frozen pipeline now requires a genuinely untouched
 chronological XAU/USD period rather than further tuning on this sample.
+
+Version 0.10.4 froze the v0.10.3 models and transported them without refitting
+from the 212-event May-August 2026 development segment to 1,046 previously
+unused XAU/USD events from January 2025 through April 2026. The dynamic
+prior-path model reduced external event-balanced Brier error from 0.40448 to
+0.36273 and log loss from 0.27658 to 0.19232. Its +0.04175 paired Brier
+improvement had a block-bootstrap 95% interval of [0.03455, 0.04936], satisfying
+the pre-registered transport rule. This is backward external calibration, not a
+profitability result or the required future holdout. It justifies
+pre-registering one separate management-policy experiment; it does not justify
+choosing a probability cutoff from inspected data.

@@ -305,6 +305,70 @@ def walk_forward_hazard_predictions(
     return pd.DataFrame(predictions), pd.DataFrame(audits)
 
 
+def external_hazard_predictions(
+    development_rows: pd.DataFrame,
+    external_rows: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fit frozen hazards on development rows and transport them unchanged."""
+    required = {"event_id", "holding_bar", "outcome", *DYNAMIC_FEATURES}
+    missing_development = required - set(development_rows.columns)
+    missing_external = required - set(external_rows.columns)
+    if missing_development:
+        raise ValueError(f"missing development risk columns: {sorted(missing_development)}")
+    if missing_external:
+        raise ValueError(f"missing external risk columns: {sorted(missing_external)}")
+    if development_rows.empty or external_rows.empty:
+        raise ValueError("development and external risk rows must be non-empty")
+
+    model_specs = {
+        "empirical_hazard": (EmpiricalHoldingHazard().fit(development_rows), None),
+        "preentry_time": (
+            FixedMultinomialModel().fit(
+                development_rows.loc[:, PREENTRY_FEATURES],
+                development_rows["outcome"],
+            ),
+            PREENTRY_FEATURES,
+        ),
+        "dynamic_path": (
+            FixedMultinomialModel().fit(
+                development_rows.loc[:, DYNAMIC_FEATURES],
+                development_rows["outcome"],
+            ),
+            DYNAMIC_FEATURES,
+        ),
+    }
+    predictions: list[dict[str, object]] = []
+    for model_name, (model, feature_names) in model_specs.items():
+        probabilities = (
+            model.predict_probability(external_rows)
+            if feature_names is None
+            else model.predict_probability(external_rows.loc[:, feature_names])
+        )
+        for (_, row), probability in zip(external_rows.iterrows(), probabilities):
+            predictions.append(
+                {
+                    "sample": "external_backward_transport",
+                    "model": model_name,
+                    "event_id": int(row["event_id"]),
+                    "holding_bar": int(row["holding_bar"]),
+                    "outcome": str(row["outcome"]),
+                    **dict(zip(PROBABILITY_COLUMNS, probability)),
+                }
+            )
+    audit = pd.DataFrame(
+        [
+            {
+                "development_events": development_rows["event_id"].nunique(),
+                "development_rows": len(development_rows),
+                "external_events": external_rows["event_id"].nunique(),
+                "external_rows": len(external_rows),
+                "models": len(model_specs),
+            }
+        ]
+    )
+    return pd.DataFrame(predictions), audit
+
+
 def competing_risk_metrics(predictions: pd.DataFrame) -> dict[str, float]:
     probabilities = predictions.loc[:, PROBABILITY_COLUMNS].to_numpy(dtype=float)
     labels = predictions["outcome"].astype(str).to_numpy()
