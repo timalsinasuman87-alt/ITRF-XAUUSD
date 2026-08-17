@@ -72,3 +72,13 @@ python research/download_databento_trades.py \
 The default local outputs are `data/databento/GC_front_trades.dbn.zst` and
 `data/databento/GC_front_orderflow_15m.csv`. Both remain ignored by Git. The
 frozen feature and evaluation definitions are in `docs/v0.9.2-hypothesis.md`.
+
+If the raw DBN transfer completed but later local validation stopped, reprocess
+the saved file without making another API request or incurring another data
+charge:
+
+```bash
+python research/download_databento_trades.py \
+  --start 2026-05-01 --end 2026-08-08 \
+  --process-existing
+```

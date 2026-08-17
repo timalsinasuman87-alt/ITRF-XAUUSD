@@ -1,5 +1,6 @@
 import unittest
 
+import numpy as np
 import pandas as pd
 
 from research.download_databento_trades import (
@@ -73,7 +74,21 @@ class DatabentoTradeAggregationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match"):
             validate_orderflow_bars(bars, processed_records=2)
 
+    def test_unsigned_trade_sizes_do_not_wrap_negative_delta(self):
+        frame = pd.DataFrame(
+            {
+                "ts_event": pd.to_datetime(
+                    ["2026-07-01T00:00:01Z", "2026-07-01T00:00:02Z"]
+                ),
+                "price": [2400.0, 2400.1],
+                "size": pd.Series([1, 5], dtype=np.uint32),
+                "side": ["B", "A"],
+            }
+        )
+        bars = combine_trade_aggregates([aggregate_trade_frame(frame)])
+        self.assertEqual(bars.iloc[0]["volume_delta"], -4)
+        self.assertAlmostEqual(bars.iloc[0]["signed_volume_ratio"], -4 / 6)
+
 
 if __name__ == "__main__":
     unittest.main()
-

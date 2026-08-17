@@ -149,6 +149,11 @@ def combine_trade_aggregates(partials: Iterable[pd.DataFrame]) -> pd.DataFrame:
         unknown_volume=("unknown_volume", "sum"),
     )
     bars = sums.join(first_rows).join(last_rows).reset_index()
+    # Databento sizes are unsigned integers. Cast before subtraction so a
+    # seller-heavy bar cannot wrap around to a value near 2**32.
+    volume_columns = ["total_volume", "buy_volume", "sell_volume", "unknown_volume"]
+    for column in volume_columns:
+        bars[column] = bars[column].astype("int64")
     specified_volume = bars["buy_volume"] + bars["sell_volume"]
     specified_trades = bars["buy_trades"] + bars["sell_trades"]
     bars["volume_delta"] = bars["buy_volume"] - bars["sell_volume"]
@@ -226,6 +231,19 @@ def validate_orderflow_bars(bars: pd.DataFrame, processed_records: int) -> None:
         raise ValueError("Aggressor coverage is outside [0, 1].")
 
 
+def aggregate_store(store, chunk_records: int) -> tuple[pd.DataFrame, int]:
+    partials: list[pd.DataFrame] = []
+    processed_records = 0
+    for frame in store.to_df(count=chunk_records, map_symbols=False):
+        partial = aggregate_trade_frame(frame)
+        if not partial.empty:
+            partials.append(partial)
+            processed_records += int(partial["trade_count"].sum())
+    bars = combine_trade_aggregates(partials)
+    validate_orderflow_bars(bars, processed_records)
+    return bars, processed_records
+
+
 def _parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Cost-gated Databento CME Gold trade and order-flow downloader."
@@ -236,6 +254,11 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument("--raw-output", type=Path, default=DEFAULT_RAW_OUTPUT)
     parser.add_argument("--key-file", type=Path, default=DEFAULT_KEY_FILE)
     parser.add_argument("--download", action="store_true")
+    parser.add_argument(
+        "--process-existing",
+        action="store_true",
+        help="Aggregate an existing raw DBN file locally without an API request.",
+    )
     parser.add_argument("--max-cost-usd", type=float, default=0.0)
     parser.add_argument("--chunk-records", type=int, default=500_000)
     parser.add_argument("--overwrite", action="store_true")
@@ -249,6 +272,8 @@ def main() -> None:
         raise ValueError("--max-cost-usd cannot be negative.")
     if args.chunk_records < 1:
         raise ValueError("--chunk-records must be positive.")
+    if args.download and args.process_existing:
+        raise ValueError("Choose either --download or --process-existing, not both.")
     if args.download and not args.overwrite:
         existing = [path for path in [args.output, args.raw_output] if path.exists()]
         if existing:
@@ -258,6 +283,21 @@ def main() -> None:
         import databento as db
     except ImportError as exc:
         raise RuntimeError("Install project requirements before using Databento.") from exc
+
+    if args.process_existing:
+        if not args.raw_output.exists():
+            raise FileNotFoundError(f"Raw DBN file does not exist: {args.raw_output}")
+        if args.output.exists() and not args.overwrite:
+            raise FileExistsError(f"Refusing to overwrite existing data: {args.output}")
+        store = db.DBNStore.from_file(args.raw_output)
+        bars, processed_records = aggregate_store(store, args.chunk_records)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        bars.to_csv(args.output, index=False)
+        print("Local processing only: no Databento API request was made.")
+        print(f"Read {processed_records:,} raw trades from {args.raw_output}")
+        print(f"Saved {len(bars):,} order-flow bars to {args.output}")
+        print(f"Aggressor-side coverage: {bars['aggressor_coverage'].mean():.2%}")
+        return
 
     client = db.Historical(load_api_key(args.key_file))
     parameters = request_parameters(args.start, args.end)
@@ -286,16 +326,7 @@ def main() -> None:
         stype_out=STYPE_OUT,
         path=args.raw_output,
     )
-    partials: list[pd.DataFrame] = []
-    processed_records = 0
-    for frame in store.to_df(count=args.chunk_records, map_symbols=False):
-        partial = aggregate_trade_frame(frame)
-        if not partial.empty:
-            partials.append(partial)
-            processed_records += int(partial["trade_count"].sum())
-
-    bars = combine_trade_aggregates(partials)
-    validate_orderflow_bars(bars, processed_records)
+    bars, processed_records = aggregate_store(store, args.chunk_records)
     bars.to_csv(args.output, index=False)
     roll_path, condition_path, roll_count = write_audit_files(client, args)
     print(f"Saved {processed_records:,} raw trades to {args.raw_output}")
