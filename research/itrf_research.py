@@ -4162,6 +4162,17 @@ def _parse_arguments():
         help="Run the pre-registered historical v0.9.2 order-flow diagnostic after v0.8.",
     )
     parser.add_argument(
+        "--v093-sequence-flow",
+        action="store_true",
+        help="Run the pre-registered historical v0.9.3 sequence-flow diagnostic after v0.8.",
+    )
+    parser.add_argument(
+        "--v093-database-file",
+        type=Path,
+        default=PROJECT_ROOT / "database" / "itrf_v093_sequence_flow.db",
+        help="Separate SQLite output for the v0.9.3 sequence-flow study.",
+    )
+    parser.add_argument(
         "--oos-start",
         default=DEFAULT_OOS_START,
         help=(
@@ -4304,6 +4315,16 @@ def main():
             data_file=arguments.data_file,
             orderflow_file=arguments.v092_orderflow_file,
             database_file=arguments.v092_database_file,
+        )
+
+    if arguments.v093_sequence_flow:
+        from run_v093_sequence_flow_research import main as run_v093_sequence_flow_study
+
+        print("\nRunning v0.9.3 historical sequence-flow diagnostic in its separate database...")
+        run_v093_sequence_flow_study(
+            data_file=arguments.data_file,
+            orderflow_file=arguments.v092_orderflow_file,
+            database_file=arguments.v093_database_file,
         )
 
 # ============================================================

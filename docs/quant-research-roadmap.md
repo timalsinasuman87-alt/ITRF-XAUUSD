@@ -55,3 +55,12 @@ same history will not be purchased to rescue it. Any next test must use a new,
 pre-registered economic mechanism, such as flow across the complete
 sweep-to-confirmation sequence, and the later untouched holdout requirement
 remains unchanged.
+
+Version 0.9.3 tested that complete sequence mechanism using the already
+downloaded file at no additional data cost. Fifteen accepted non-overlapping
+observations averaged 0.000R gross and became negative under both frozen cost
+burdens; the chronological quarters were unstable. It is not promoted. The
+project now has evidence that simple directional delta signs, whether measured
+on one bar or across the causal sequence, are insufficient. The next step
+should be an explicit research-design review before another paid download or
+feature test, not another threshold search.
