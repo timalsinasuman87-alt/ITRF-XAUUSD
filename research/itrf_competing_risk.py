@@ -112,7 +112,7 @@ def build_risk_set_rows(
 class FixedMultinomialModel:
     """Deterministic L2 softmax model with NONE as the reference category."""
 
-    def __init__(self, l2_strength: float = 1.0, maximum_iterations: int = 20_000):
+    def __init__(self, l2_strength: float = 1.0, maximum_iterations: int = 50_000):
         if not np.isfinite(l2_strength) or l2_strength < 0:
             raise ValueError("l2_strength must be non-negative and finite")
         self.l2_strength = float(l2_strength)
@@ -150,6 +150,21 @@ class FixedMultinomialModel:
         exponentials = np.exp(np.clip(logits, -35.0, 0.0))
         return exponentials / exponentials.sum(axis=1, keepdims=True)
 
+    @staticmethod
+    def _largest_gram_eigenvalue(design: np.ndarray, iterations: int = 100) -> float:
+        """Deterministic power iteration without platform-specific BLAS calls."""
+        vector = np.ones(design.shape[1], dtype=float)
+        vector /= np.sqrt(np.sum(vector * vector))
+        for _ in range(iterations):
+            projection = np.sum(design * vector, axis=1)
+            updated = np.sum(design * projection[:, None], axis=0)
+            norm = float(np.sqrt(np.sum(updated * updated)))
+            if not np.isfinite(norm) or norm <= 0:
+                raise FloatingPointError("invalid multinomial spectral norm")
+            vector = updated / norm
+        projection = np.sum(design * vector, axis=1)
+        return float(np.sum(projection * projection))
+
     def fit(self, features: pd.DataFrame, target: pd.Series) -> "FixedMultinomialModel":
         design = self._prepare(features, fit=True)
         labels = target.astype(str).to_numpy()
@@ -163,7 +178,11 @@ class FixedMultinomialModel:
         coefficients[0, :] = np.log(counts[1:] / counts[0])
         penalty = np.full(design.shape[1], self.l2_strength)
         penalty[0] = 0.0
-        lipschitz = float(0.5 * np.sum(design * design) + 2.0 * np.sum(penalty))
+        gram_eigenvalue = self._largest_gram_eigenvalue(design)
+        # The class-covariance spectral bound is 0.5.  A one-percent safety
+        # margin keeps the deterministic step below the global smoothness
+        # limit while avoiding the excessively loose Gram-trace bound.
+        lipschitz = 1.01 * (0.5 * gram_eigenvalue + self.l2_strength)
         if not np.isfinite(lipschitz) or lipschitz <= 0:
             raise FloatingPointError("invalid multinomial curvature bound")
         step_size = 1.0 / lipschitz
@@ -177,7 +196,7 @@ class FixedMultinomialModel:
             update = step_size * gradient
             coefficients = coefficients + update
             self.iterations = iteration
-            if np.max(np.abs(update)) < 1e-9:
+            if np.max(np.abs(update)) < 1e-8:
                 self.converged = True
                 break
         if not self.converged:

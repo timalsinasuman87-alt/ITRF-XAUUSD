@@ -89,3 +89,14 @@ were positive, but timeouts were too rare to explain the dominant 73.1% stop
 incidence. No exit or time rule is promoted. A future increment may build a
 calibration-only competing-risk framework against empirical holding-bar
 hazards, followed by untouched chronological validation.
+
+Version 0.10.3 implemented that causal competing-risk framework. It generated
+2,601 start-of-bar risk rows, with dynamic features shifted so current-bar OHLC
+could not predict its own stop or target. Across 1,594 purged walk-forward test
+rows, the dynamic model reduced pooled log loss from 0.29931 to 0.24174 and
+event-balanced Brier error from 0.42507 to 0.41963 versus empirical holding-bar
+hazards. However, its +0.00544 mean event-balanced improvement had a wide
+block-bootstrap 95% interval of [-0.01689, 0.02571] and was negative in two of
+three folds. Path state is promising but not validated, and no management rule
+is promoted. The frozen pipeline now requires a genuinely untouched
+chronological XAU/USD period rather than further tuning on this sample.
