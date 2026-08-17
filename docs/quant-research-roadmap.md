@@ -123,3 +123,16 @@ calibration from decision value: next-bar hazard information transported, but
 this myopic exit did not create an edge. No probability multiplier or timing
 may be tuned on the inspected sample. Any later policy requires a separately
 specified continuation-value framework and future chronological validation.
+
+Version 0.10.6 then pre-registered that continuation-value framework. A fixed
+event-weighted ridge estimated the complete remaining baseline payoff relative
+to exiting at each current bar open, using purged out-of-fold development
+hazards and externally transported hazards without tuning. The policy exited
+930 of 1,046 paired external events, usually at holding bar 2, and reduced mean
+gross outcome by 0.05262R. Its paired 95% interval was [-0.13623R, +0.03011R];
+profit factor and cost-adjusted drawdown were worse at both locked cost levels.
+The policy failed and is quarantined. The project must now stop fitting exit
+rules to this inspected history and return to an entry-architecture and
+information-set review. Any genuinely new causal hypothesis must be frozen
+before a new chronological XAU/USD period is observed; calibration accuracy is
+not itself a strategic edge.
