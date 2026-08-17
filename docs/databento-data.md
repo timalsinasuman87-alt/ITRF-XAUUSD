@@ -45,3 +45,30 @@ price series as if they represented the same instrument.
 Before running research, use `research/validate_market_data.py` with the bar,
 roll, and condition files. The frozen experiment and interpretation rules are
 documented in `docs/databento-validation-plan.md`.
+
+## v0.9.2 trade-level order flow
+
+The v0.9.2 downloader requests the separate Databento `trades` schema and
+retains the compressed raw DBN file for audit. It also creates compact
+15-minute features containing actual aggressor buy/sell volume, volume delta,
+aggressor-side coverage, trade intensity, and trade-price VWAP.
+
+Always estimate first:
+
+```bash
+python research/download_databento_trades.py \
+  --start 2026-05-01 --end 2026-08-08
+```
+
+The approved bounded download uses a hard ceiling slightly above the provider
+estimate:
+
+```bash
+python research/download_databento_trades.py \
+  --start 2026-05-01 --end 2026-08-08 \
+  --download --max-cost-usd 7.00
+```
+
+The default local outputs are `data/databento/GC_front_trades.dbn.zst` and
+`data/databento/GC_front_orderflow_15m.csv`. Both remain ignored by Git. The
+frozen feature and evaluation definitions are in `docs/v0.9.2-hypothesis.md`.
