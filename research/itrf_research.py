@@ -4125,6 +4125,18 @@ def _parse_arguments():
         help="Separate SQLite output for the v0.9.1 causal context study.",
     )
     parser.add_argument(
+        "--v092-database-file",
+        type=Path,
+        default=PROJECT_ROOT / "database" / "itrf_v092_orderflow.db",
+        help="Separate SQLite output for the v0.9.2 order-flow study.",
+    )
+    parser.add_argument(
+        "--v092-orderflow-file",
+        type=Path,
+        default=PROJECT_ROOT / "data" / "databento" / "GC_front_orderflow_15m.csv",
+        help="Historical CME Gold order-flow validation features.",
+    )
+    parser.add_argument(
         "--v09-context",
         action="store_true",
         help="Run the isolated v0.9 market-context study after the v0.8 baseline.",
@@ -4143,6 +4155,11 @@ def _parse_arguments():
         "--v091-context",
         action="store_true",
         help="Run the pre-registered v0.9.1 causal context diagnostic after v0.8.",
+    )
+    parser.add_argument(
+        "--v092-orderflow",
+        action="store_true",
+        help="Run the pre-registered historical v0.9.2 order-flow diagnostic after v0.8.",
     )
     parser.add_argument(
         "--oos-start",
@@ -4277,6 +4294,16 @@ def main():
         run_v091_context_study(
             data_file=arguments.data_file,
             database_file=arguments.v091_database_file,
+        )
+
+    if arguments.v092_orderflow:
+        from run_v092_orderflow_research import main as run_v092_orderflow_study
+
+        print("\nRunning v0.9.2 historical order-flow diagnostic in its separate database...")
+        run_v092_orderflow_study(
+            data_file=arguments.data_file,
+            orderflow_file=arguments.v092_orderflow_file,
+            database_file=arguments.v092_database_file,
         )
 
 # ============================================================

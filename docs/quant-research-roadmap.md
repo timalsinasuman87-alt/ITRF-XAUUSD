@@ -46,3 +46,12 @@ Databento development quarter was negative. A small long/uptrend cohort was
 positive in aggregate across two development feeds but failed in the newest
 Databento quarter, so it is not promoted. The next research module must add a
 genuinely different information source rather than tune this state machine.
+
+Version 0.9.2 added that new information through historical CME Gold trade
+aggressor flow while retaining XAU/USD as the research instrument. The frozen
+confirmation-bar delta-sign gate produced 13 non-overlapping accepted
+development observations with a -0.154R gross average and failed. More of the
+same history will not be purchased to rescue it. Any next test must use a new,
+pre-registered economic mechanism, such as flow across the complete
+sweep-to-confirmation sequence, and the later untouched holdout requirement
+remains unchanged.
