@@ -78,3 +78,14 @@ ROC AUC, but its 0.1214 Brier score was worse than the training-frequency null's
 interval of [-0.02205, 0.01442], and it degraded in two of three folds. The
 context family is not promoted. The next increment is failure anatomy and event
 lifecycle measurement, not a probability-threshold or feature-subset search.
+
+Version 0.10.2 expanded all 212 clean events into a conserved 2,601-row
+lifecycle panel and measured competing stop, target and timeout events. Stops
+were 59 of 65 terminals in bars 1-4 and 125 of 145 terminals through bar 16.
+However, 79 of 155 eventual stops first reached +0.5R and 44 first reached +1R
+on fully observed pre-terminal bars. The failure set therefore mixes early
+adverse selection with favorable-excursion giveback. Twenty-two of 25 timeouts
+were positive, but timeouts were too rare to explain the dominant 73.1% stop
+incidence. No exit or time rule is promoted. A future increment may build a
+calibration-only competing-risk framework against empirical holding-bar
+hazards, followed by untouched chronological validation.
