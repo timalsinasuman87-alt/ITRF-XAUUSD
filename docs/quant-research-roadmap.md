@@ -111,3 +111,15 @@ the pre-registered transport rule. This is backward external calibration, not a
 profitability result or the required future holdout. It justifies
 pre-registering one separate management-policy experiment; it does not justify
 choosing a probability cutoff from inspected data.
+
+Version 0.10.5 then tested one payoff-derived management action without a
+threshold search: after holding bar 1, exit at the next bar open when predicted
+stop risk exceeded three times predicted target risk. The rule acted on 908 of
+1,046 paired external events, usually at holding bar 2, and reduced mean gross
+outcome by 0.06136R. Its paired 95% interval was [-0.14535R, +0.02083R], profit
+factor was worse at both locked cost levels, and cost-adjusted drawdown was
+worse. The policy failed and is quarantined. The result separates probability
+calibration from decision value: next-bar hazard information transported, but
+this myopic exit did not create an edge. No probability multiplier or timing
+may be tuned on the inspected sample. Any later policy requires a separately
+specified continuation-value framework and future chronological validation.
