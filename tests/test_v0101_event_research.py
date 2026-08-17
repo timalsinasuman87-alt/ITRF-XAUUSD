@@ -8,11 +8,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
 
 from itrf_event_research import (
+    BASELINE_FEATURES,
+    CONTEXT_FEATURES,
     FixedLogisticModel,
     WalkForwardConfig,
     block_bootstrap_mean_ci,
     probability_metrics,
     purged_walk_forward_folds,
+    walk_forward_predictions,
 )
 
 
@@ -58,6 +61,44 @@ def test_logistic_preprocessing_is_fitted_from_training_only() -> None:
     assert np.array_equal(model.means, training_mean)
     assert probabilities.shape == (2,)
     assert np.isfinite(probabilities).all()
+
+
+def test_logistic_solver_remains_finite_under_near_separation() -> None:
+    features = pd.DataFrame(
+        {
+            "rare": [0.0] * 18 + [1.0, 1.0],
+            "large": [-1e6, 1e6] * 10,
+        }
+    )
+    target = pd.Series([0] * 18 + [1, 1])
+    model = FixedLogisticModel().fit(features, target)
+    probabilities = model.predict_probability(features)
+    assert model.converged
+    assert np.isfinite(model.coefficients).all()
+    assert np.isfinite(probabilities).all()
+    assert ((probabilities > 0) & (probabilities < 1)).all()
+
+
+def test_walk_forward_predictions_remain_finite() -> None:
+    count = 40
+    events = event_intervals(count)
+    events["event_id"] = np.arange(count)
+    events["target_success"] = (np.arange(count) % 7 == 0).astype(int)
+    events["gross_r_lower"] = np.where(events["target_success"] == 1, 3.0, -1.0)
+    events["ambiguous"] = 0
+    for feature_number, feature in enumerate(CONTEXT_FEATURES):
+        events[feature] = (
+            np.sin(np.arange(count) * (feature_number + 1))
+            if feature not in BASELINE_FEATURES or feature.startswith("signed_")
+            else np.arange(count) % 2
+        )
+    predictions, folds = walk_forward_predictions(
+        events,
+        WalkForwardConfig(folds=3, initial_train_fraction=0.4, embargo_bars=2),
+    )
+    assert len(folds) == 3
+    assert predictions["probability"].between(0.0, 1.0, inclusive="neither").all()
+    assert np.isfinite(predictions["probability"]).all()
 
 
 def test_probability_metrics_match_perfect_predictions() -> None:

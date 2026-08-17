@@ -172,7 +172,7 @@ def purged_walk_forward_folds(
 class FixedLogisticModel:
     """Small deterministic L2-logistic model with train-only preprocessing."""
 
-    def __init__(self, l2_strength: float = 1.0, maximum_iterations: int = 100):
+    def __init__(self, l2_strength: float = 1.0, maximum_iterations: int = 10_000):
         if l2_strength < 0 or not np.isfinite(l2_strength):
             raise ValueError("l2_strength must be non-negative and finite")
         self.l2_strength = float(l2_strength)
@@ -181,6 +181,8 @@ class FixedLogisticModel:
         self.means: np.ndarray | None = None
         self.scales: np.ndarray | None = None
         self.coefficients: np.ndarray | None = None
+        self.iterations: int = 0
+        self.converged: bool = False
 
     def _prepare(self, values: pd.DataFrame, fit: bool) -> np.ndarray:
         matrix = values.to_numpy(dtype=float)
@@ -212,19 +214,36 @@ class FixedLogisticModel:
             probability = float(np.clip(y.mean(), 1e-6, 1 - 1e-6))
             self.coefficients = np.zeros(design.shape[1])
             self.coefficients[0] = np.log(probability / (1.0 - probability))
+            self.converged = True
             return self
         coefficients = np.zeros(design.shape[1])
-        penalty = np.eye(design.shape[1]) * self.l2_strength
-        penalty[0, 0] = 0.0
-        for _ in range(self.maximum_iterations):
-            probability = self._sigmoid(design @ coefficients)
-            weights = np.clip(probability * (1.0 - probability), 1e-8, None)
-            gradient = design.T @ (y - probability) - penalty @ coefficients
-            information = design.T @ (weights[:, None] * design) + penalty
-            update = np.linalg.solve(information, gradient)
-            coefficients += update
-            if np.max(np.abs(update)) < 1e-8:
+        penalty = np.full(design.shape[1], self.l2_strength)
+        penalty[0] = 0.0
+        # Logistic curvature is bounded by 0.25 * X'X.  A fixed Lipschitz
+        # upper bound gives deterministic, monotone, overflow-safe gradient
+        # steps without data-dependent solver tuning.
+        # Its trace is 0.25 * sum(X^2) plus the diagonal L2 penalty, and
+        # upper-bounds the largest eigenvalue.  The explicit reductions also
+        # avoid platform-specific small-matrix BLAS status-flag anomalies.
+        lipschitz = float(0.25 * np.sum(design * design) + np.sum(penalty))
+        if not np.isfinite(lipschitz) or lipschitz <= 0:
+            raise FloatingPointError("invalid logistic curvature bound")
+        step_size = 1.0 / lipschitz
+        for iteration in range(1, self.maximum_iterations + 1):
+            linear = np.sum(design * coefficients, axis=1)
+            probability = self._sigmoid(linear)
+            residual = y - probability
+            gradient = np.sum(design * residual[:, None], axis=0) - penalty * coefficients
+            update = step_size * gradient
+            coefficients = coefficients + update
+            self.iterations = iteration
+            if np.max(np.abs(update)) < 1e-10:
+                self.converged = True
                 break
+        if not self.converged:
+            raise RuntimeError("logistic solver did not converge")
+        if not np.isfinite(coefficients).all():
+            raise FloatingPointError("logistic solver produced non-finite coefficients")
         self.coefficients = coefficients
         return self
 
@@ -232,7 +251,7 @@ class FixedLogisticModel:
         if self.coefficients is None:
             raise RuntimeError("model is not fitted")
         design = self._prepare(features, fit=False)
-        return self._sigmoid(design @ self.coefficients)
+        return self._sigmoid(np.sum(design * self.coefficients, axis=1))
 
 
 def probability_metrics(target: pd.Series, probability: pd.Series) -> dict[str, float]:

@@ -64,3 +64,17 @@ project now has evidence that simple directional delta signs, whether measured
 on one bar or across the causal sequence, are insufficient. The next step
 should be an explicit research-design review before another paid download or
 feature test, not another threshold search.
+
+Version 0.10 then replaced overlapping forward labels with a clean event core:
+next-open entry, one position at a time, explicit stop/target/timeout events,
+same-bar ambiguity bounds, cost sensitivity, and right-censor protection. The
+212 accepted sequential events averaged -0.179R gross with a 0.758 R profit
+factor, so the v0.8 signal remained negative under the corrected architecture.
+
+Version 0.10.1 used the clean events in three purged, expanding walk-forward
+folds. The fixed expanded causal-context logistic model achieved a 0.643 pooled
+ROC AUC, but its 0.1214 Brier score was worse than the training-frequency null's
+0.1169. Its paired Brier improvement was -0.00445 with a block-bootstrap 95%
+interval of [-0.02205, 0.01442], and it degraded in two of three folds. The
+context family is not promoted. The next increment is failure anatomy and event
+lifecycle measurement, not a probability-threshold or feature-subset search.
